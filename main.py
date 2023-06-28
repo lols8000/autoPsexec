@@ -40,7 +40,7 @@ def funcoesPsexec(opcao):
         comando = f'taskkill /F /IM {nome_processo}.exe'
 
     elif opcao == '7':
-        comando = f'cmd /c "taskkill /F /IM firefox.exe & xcopy C:\Program Files\\uvnc bvba \\\\{computador_destino}\\c$\\Program Files /E /I /Y & shutdown /r /t 5"'
+        comando = f'cmd /c "taskkill /F /IM winvnc.exe & xcopy C:\Program Files\\uvnc bvba \\\\{computador_destino}\\c$\\Program Files /E /I /Y & shutdown /r /t 5"'
 
     else:
         print('comando inválido')
@@ -56,7 +56,7 @@ def executaPsexec():
     print('4-Iniciar um serviço.')
     print('5-Iniciar gpupdate.')
     print('6-Finalizar um processo.')
-    print('7-Copiar arquivos do VNC.')
+    print('7-Copiar pasta do VNC para o computador do usuário.')
     opcao = input('Digite uma opção: ')
 
     comandoEscolhido = funcoesPsexec(opcao)
