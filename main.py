@@ -4,6 +4,9 @@ import sys
 
 
 def funcoesPsexec(opcao):
+
+    computador_destino = input("Digite hostname\ip de destino: ")
+
     if opcao == '1':
         mensagem = input('Digite a mensagem: ')
         comando = f'msg * {mensagem}'
@@ -37,14 +40,12 @@ def funcoesPsexec(opcao):
         comando = f'taskkill /F /IM {nome_processo}.exe'
 
     elif opcao == '7':
-
-        comando = 'cmd /c "taskkill /F /IM firefox.exe & xcopy C:\Program Files\\uvnc bvba c:\\#testes\\uvnc bvba /E /I /Y & shutdown /r /t 15"'
-        # psexec \\humap-wk-525363 cmd /c "taskkill /F /IM firefox.exe & xcopy 'C:\Program Files\uvnc bvba' 'c:\#testes\uvnc bvba' /E /I /Y & shutdown /r /t 15"
+        comando = f'cmd /c "taskkill /F /IM firefox.exe & xcopy C:\Program Files\\uvnc bvba \\\\{computador_destino}\\c$\\Program Files /E /I /Y & shutdown /r /t 5"'
 
     else:
         print('comando inválido')
 
-    return comando
+    return f'\\\\{computador_destino} ' + comando
 
 
 def executaPsexec():
@@ -58,11 +59,10 @@ def executaPsexec():
     print('7-Copiar arquivos do VNC.')
     opcao = input('Digite uma opção: ')
 
-    computador_destino = input("Digite host\ip de destino: ")
     comandoEscolhido = funcoesPsexec(opcao)
 
     # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
-    comando = f"psexec \\\\{computador_destino} {comandoEscolhido}"
+    comando = f"psexec {comandoEscolhido}"
 
     # Executa o comando externo
     processo = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
