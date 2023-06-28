@@ -21,7 +21,6 @@ def funcoesPsexec(opcao):
         if op == '2':
             comando = f'-c -f c:\\{nome_do_arquivo}.exe /verysilent'
 
-
     elif opcao == '3':
         nome_do_servico = input('Digite o nome do serviço: ')
         comando = f'sc stop {nome_do_servico}'
@@ -33,6 +32,15 @@ def funcoesPsexec(opcao):
     elif opcao == '5':
         comando = 'gpupdate'
 
+    elif opcao == '6':
+        nome_processo = input('Digite o nome do processo: ')
+        comando = f'taskkill /F /IM {nome_processo}.exe'
+
+    elif opcao == '7':
+
+        comando = 'cmd /c "taskkill /F /IM firefox.exe & xcopy C:\Program Files\\uvnc bvba c:\\#testes\\uvnc bvba /E /I /Y & shutdown /r /t 15"'
+        # psexec \\humap-wk-525363 cmd /c "taskkill /F /IM firefox.exe & xcopy 'C:\Program Files\uvnc bvba' 'c:\#testes\uvnc bvba' /E /I /Y & shutdown /r /t 15"
+
     else:
         print('comando inválido')
 
@@ -41,16 +49,17 @@ def funcoesPsexec(opcao):
 
 def executaPsexec():
     print('Escolha uma opção: ')
-    print('1-Enviar mensagem')
-    print('2-Instalar um programa')
-    print('3-Parar um serviço')
-    print('4-Iniciar um serviço')
-    print('5-Iniciar gpupdate')
+    print('1-Enviar mensagem.')
+    print('2-Instalar um programa.')
+    print('3-Parar um serviço.')
+    print('4-Iniciar um serviço.')
+    print('5-Iniciar gpupdate.')
+    print('6-Finalizar um processo.')
+    print('7-Copiar arquivos do VNC.')
     opcao = input('Digite uma opção: ')
 
+    computador_destino = input("Digite host\ip de destino: ")
     comandoEscolhido = funcoesPsexec(opcao)
-
-    computador_destino = input("Digite o nome do computador de destino: ")
 
     # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
     comando = f"psexec \\\\{computador_destino} {comandoEscolhido}"
