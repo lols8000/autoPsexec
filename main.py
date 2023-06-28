@@ -1,6 +1,8 @@
 import subprocess
 import ctypes
+import socket
 import sys
+import os
 
 
 def funcoesPsexec(opcao):
@@ -9,7 +11,7 @@ def funcoesPsexec(opcao):
 
     if opcao == '1':
         mensagem = input('Digite a mensagem: ')
-        comando = f'msg * {mensagem}'
+        comando = f'\\\\{computador_destino} msg * {mensagem}'
 
     elif opcao == '2':
         print('Escolha uma opção: ')
@@ -20,32 +22,36 @@ def funcoesPsexec(opcao):
         nome_do_arquivo = input('Digite o nome do arquivo: ')
 
         if op == '1':
-            comando = f'-c -f c:\\{nome_do_arquivo}.exe /s'
+            comando = f'\\\\{computador_destino} -c -f c:\\{nome_do_arquivo}.exe /s'
         if op == '2':
-            comando = f'-c -f c:\\{nome_do_arquivo}.exe /verysilent'
+            comando = f'\\\\{computador_destino} -c -f c:\\{nome_do_arquivo}.exe /verysilent'
 
     elif opcao == '3':
         nome_do_servico = input('Digite o nome do serviço: ')
-        comando = f'sc stop {nome_do_servico}'
+        comando = f'\\\\{computador_destino} sc stop {nome_do_servico}'
 
     elif opcao == '4':
         nome_do_servico = input('Digite o nome do serviço: ')
-        comando = f'sc start {nome_do_servico}'
+        comando = f'\\\\{computador_destino} sc start {nome_do_servico}'
 
     elif opcao == '5':
-        comando = 'gpupdate'
+        comando = f'\\\\{computador_destino} gpupdate'
 
     elif opcao == '6':
         nome_processo = input('Digite o nome do processo: ')
-        comando = f'taskkill /F /IM {nome_processo}.exe'
+        comando = f'\\\\{computador_destino} taskkill /F /IM {nome_processo}.exe'
 
     elif opcao == '7':
-        comando = f'cmd /c "taskkill /F /IM winvnc.exe & xcopy C:\Program Files\\uvnc bvba \\\\{computador_destino}\\c$\\Program Files /E /I /Y & shutdown /r /t 5"'
+        hostname = socket.gethostname()
+        comando = f'\\\\{hostname} cmd /c "taskkill /F /IM firefox.exe & xcopy "\\\\{hostname}\\c$\\Program Files\\uvnc bvba" "\\\\{computador_destino}\\c$\\Program Files\\uvnc bvba" /E /I /Y"'
+
+    elif opcao == '8':
+        comando = f'\\\\{computador_destino} shutdown /r /t 10'
 
     else:
         print('comando inválido')
 
-    return f'\\\\{computador_destino} ' + comando
+    return comando
 
 
 def executaPsexec():
@@ -57,7 +63,11 @@ def executaPsexec():
     print('5-Iniciar gpupdate.')
     print('6-Finalizar um processo.')
     print('7-Copiar pasta do VNC para o computador do usuário.')
-    opcao = input('Digite uma opção: ')
+    print('8-Reiniciar computador.')
+
+    opcao = input('\nDigite uma opção: ')
+
+    _ = os.system('cls')
 
     comandoEscolhido = funcoesPsexec(opcao)
 
@@ -76,6 +86,7 @@ def executaPsexec():
         print("Erro ao executar o comando.")
         print("Erro:", erro.decode('latin1'))
 
+    input('Pressione qualquer tecla para continuar...')
 
 def run_as_admin():
     script = sys.argv[0]
