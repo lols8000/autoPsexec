@@ -43,10 +43,10 @@ def funcoesPsexec(opcao):
 
     elif opcao == '7':
         hostname = socket.gethostname()
-        comando = f'\\\\{hostname} cmd /c "taskkill /F /IM firefox.exe & xcopy "\\\\{hostname}\\c$\\Program Files\\uvnc bvba" "\\\\{computador_destino}\\c$\\Program Files\\uvnc bvba" /E /I /Y"'
+        comando = f'\\\\{hostname} cmd /c "taskkill /F /IM winvnc.exe & xcopy "\\\\{hostname}\\c$\\Program Files\\uvnc bvba" "\\\\{computador_destino}\\c$\\Program Files\\uvnc bvba" /E /I /Y"'
 
     elif opcao == '8':
-        comando = f'\\\\{computador_destino} shutdown /r /t 10'
+        comando = f'\\\\{computador_destino} shutdown /r /t 0'
 
     else:
         print('comando inválido')
