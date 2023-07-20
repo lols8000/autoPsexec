@@ -1,12 +1,36 @@
 import subprocess
+import getpass
 import ctypes
 import socket
 import sys
 import os
 
+def usuarioLogado(computador_destino):
+
+    # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
+    comando = f"psexec \\\\{computador_destino} quser"
+
+    # Executa o comando externo
+    processo = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    saida, erro = processo.communicate()
+
+    usuario = str(saida.decode('latin1'))
+
+    lines = usuario.split('\n')
+    if len(lines) >= 3:
+        columns = lines[6].split()
+        if len(columns) >= 2:
+            return columns[0]
+
+def finalizaProcesso(computador_destino, name):
+
+    # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
+    comando = f"psexec \\\\{computador_destino} taskkill /F /IM {name}.exe"
+
+    # Executa o comando externo
+    subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 def funcoesPsexec(opcao):
-
     computador_destino = input("Digite hostname\ip de destino: ")
 
     if opcao == '1':
@@ -43,10 +67,26 @@ def funcoesPsexec(opcao):
 
     elif opcao == '7':
         hostname = socket.gethostname()
-        comando = f'\\\\{hostname} cmd /c "taskkill /F /IM winvnc.exe & xcopy "\\\\{hostname}\\c$\\Program Files\\uvnc bvba" "\\\\{computador_destino}\\c$\\Program Files\\uvnc bvba" /E /I /Y"'
+
+        finalizaProcesso(computador_destino, 'winvnc')
+        comando = f'\\\\{hostname} cmd /c "xcopy "\\\\{hostname}\\c$\\Program Files\\uvnc bvba" "\\\\{computador_destino}\\c$\\Program Files\\uvnc bvba" /E /I /Y"'
 
     elif opcao == '8':
         comando = f'\\\\{computador_destino} shutdown /r /t 0'
+
+    elif opcao == '9':
+        comando = f'\\\\{computador_destino} ipconfig /all'
+
+    elif opcao == '10':
+        comando = f'\\\\{computador_destino} hostname'
+
+    elif opcao == '11':
+        hostname = socket.gethostname()
+        usuario_logado_origem = getpass.getuser()
+        usuario_logado_destino = usuarioLogado(computador_destino)
+
+        finalizaProcesso(computador_destino, 'Teams')
+        comando = f'\\\\{hostname} cmd /c "xcopy "\\\\{hostname}\\c$\\Users\\{usuario_logado_origem}\\AppData\\Local\\Microsoft\\Teams" "\\\\{computador_destino}\\c$\\Users\\{usuario_logado_destino}\\AppData\\Local\\Microsoft\\Teams" /E /I /Y"'
 
     else:
         print('comando inválido')
@@ -55,38 +95,50 @@ def funcoesPsexec(opcao):
 
 
 def executaPsexec():
-    print('Escolha uma opção: ')
-    print('1-Enviar mensagem.')
-    print('2-Instalar um programa.')
-    print('3-Parar um serviço.')
-    print('4-Iniciar um serviço.')
-    print('5-Iniciar gpupdate.')
-    print('6-Finalizar um processo.')
-    print('7-Copiar pasta do VNC para o computador do usuário.')
-    print('8-Reiniciar computador.')
+    while True:
+        print('Escolha uma opção: ')
+        print('0-finalizar execução do programa.')
+        print('1-Enviar mensagem.')
+        print('2-Instalar um programa.')
+        print('3-Parar um serviço.')
+        print('4-Iniciar um serviço.')
+        print('5-Iniciar gpupdate.')
+        print('6-Finalizar um processo.')
+        print('7-Copiar pasta do VNC para o computador do usuário.')
+        print('8-Reiniciar computador.')
+        print('9-ipconfig.')
+        print('10-Informa o nome da máquina.')
+        print('11-Copiar pasta do Teams para o computador do usuário.')
 
-    opcao = input('\nDigite uma opção: ')
+        opcao = input('\nDigite uma opção: ')
 
-    _ = os.system('cls')
+        if opcao == '0':
+            raise SystemExit
 
-    comandoEscolhido = funcoesPsexec(opcao)
+        else:
+            _ = os.system('cls')
 
-    # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
-    comando = f"psexec {comandoEscolhido}"
+            comandoEscolhido = funcoesPsexec(opcao)
 
-    # Executa o comando externo
-    processo = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    saida, erro = processo.communicate()
+            # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
+            comando = f"psexec {comandoEscolhido}"
 
-    # Verifica a saída e o erro
-    if processo.returncode == 0:
-        print("Comando executado com sucesso.")
-        print("Saída:", saida.decode('latin1'))
-    else:
-        print("Erro ao executar o comando.")
-        print("Erro:", erro.decode('latin1'))
+            # Executa o comando externo
+            processo = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            saida, erro = processo.communicate()
 
-    input('Pressione qualquer tecla para continuar...')
+            # Verifica a saída e o erro
+            if processo.returncode == 0:
+                print("Comando executado com sucesso.")
+                print("Saída:", saida.decode('latin1'))
+            else:
+                print("Erro ao executar o comando.")
+                print("Erro:", erro.decode('latin1'))
+
+            input('Pressione qualquer tecla para continuar...')
+
+            _ = os.system('cls')
+
 
 def run_as_admin():
     script = sys.argv[0]
