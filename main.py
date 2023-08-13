@@ -146,8 +146,8 @@ def joinDomain(computador_destino):
     return comando
 
 
-def newComand(computador_destino):
-    comando = f'\\\\{computador_destino} caminho\para\seu\executavel.exe'
+def getSerialNumber(computador_destino):
+    comando = f'\\\\{computador_destino} wmic bios get serialnumber'
 
     return comando
 
@@ -170,7 +170,7 @@ def functionPsexec(option):
         '12': disableInterfaceWiFi,
         '13': GlpiInfo,
         '14': joinDomain,
-        '15': newComand
+        '15': getSerialNumber
     }
 
     option_menu.get(option, lambda: 'Opção inválida.')(computador_destino)
@@ -202,7 +202,7 @@ def executaPsexec():
         print('12-Desabilitar rede wi-fi.')
         print('13-Atualizar Glpi.')
         print('14-Ingressa computador no dominio.')
-        print('15-Novo comando.')
+        print('15-Serial Number do computador.')
 
         opcao = input('\nDigite uma opção: ')
 
