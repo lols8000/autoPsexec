@@ -21,13 +21,17 @@ def usuarioLogado(computador_destino):
 
 
 def interfaceWiFiName(computador_destino):
-    # Comando psexec para descobrir o nome da itnerface Wi-Fi
-    comando = f"psexec \\\\{computador_destino} netsh interface show interface"
+    # Comando psexec para descobrir o nome da interface Wi-Fi
+    comando = f"psexec -h \\\\{computador_destino} netsh interface show interface"
     processo = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     saida, erro = processo.communicate()
     interface_wifi = str(saida.decode('latin1'))
+    lines = interface_wifi.split('\n')
 
-    return interface_wifi
+    if len(lines) >= 3:
+        columns = lines[8].split()
+        if len(columns) >= 2:
+            return columns[3]
 
 
 def sendMessage(computador_destino):
@@ -130,18 +134,8 @@ def disableInterfaceWiFi(computador_destino):
 
 
 def GlpiInfo(computador_destino):
-    comando = f'\\\\{computador_destino} caminho\para\seu\executavel.exe'
-
-    return comando
-
-
-def joinDomain(computador_destino):
-    domain_name = 'ebserhnet.ebserh.gov.br'
-    user_name = input('Digite nome do usuario: ')
-    password = input('Digite a senha: ')
-    new_name = input('Digite o nome do computador: ')
-
-    comando = f'\\\\{computador_destino} netdom join %COMPUTERNAME% /domain:<{domain_name}> /user:<{user_name}> /password:<{password}> /newname:<{new_name}> /reboot'
+    file_name = '{C22A4F1C-AE24-48D6-AC49-1B0D8D9572DF}'
+    comando = f'\\\\{computador_destino} C:\Windows\System32\GroupPolicy\DataStore\\0\SysVol\ebserhnet.ebserh.gov.br\Policies\\{file_name}\Machine\Scripts\Startup\glpiagentinstall.bat'
 
     return comando
 
@@ -169,11 +163,10 @@ def functionPsexec(option):
         '11': copyTeamsForUserComputer,
         '12': disableInterfaceWiFi,
         '13': GlpiInfo,
-        '14': joinDomain,
-        '15': getSerialNumber
+        '14': getSerialNumber,
     }
 
-    option_menu.get(option, lambda: 'Opção inválida.')(computador_destino)
+    return option_menu.get(option, lambda: 'Opção inválida.')(computador_destino)
 
 
 def finalizaProcesso(computador_destino, name):
@@ -201,8 +194,7 @@ def executaPsexec():
         print('11-Copiar pasta do Teams para o computador do usuário.')
         print('12-Desabilitar rede wi-fi.')
         print('13-Atualizar Glpi.')
-        print('14-Ingressa computador no dominio.')
-        print('15-Serial Number do computador.')
+        print('14-Serial Number do computador.')
 
         opcao = input('\nDigite uma opção: ')
 
@@ -212,8 +204,10 @@ def executaPsexec():
         else:
             _ = os.system('cls')
 
+            comando_escolhido = functionPsexec(opcao)
+
             # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
-            comando = f"psexec {functionPsexec(opcao)}"
+            comando = f"psexec {comando_escolhido}"
 
             # Executa o comando externo
             processo = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
