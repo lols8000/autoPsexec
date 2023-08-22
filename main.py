@@ -6,6 +6,7 @@ import sys
 import os
 
 
+# Teste
 def usuarioLogado(computador_destino):
     # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
     comando = f"psexec \\\\{computador_destino} quser"
