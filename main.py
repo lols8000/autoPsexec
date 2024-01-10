@@ -4,12 +4,14 @@ import ctypes
 import socket
 import sys
 import os
+import time
 
 
-# Teste
 def usuarioLogado(computador_destino):
+    psexec_path = r'C:\Windows\System32\PsExec.exe'
+
     # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
-    comando = f"psexec \\\\{computador_destino} quser"
+    comando = f"{psexec_path} \\\\{computador_destino} quser"
     processo = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     saida, erro = processo.communicate()
     usuario = str(saida.decode('latin1'))
@@ -22,8 +24,10 @@ def usuarioLogado(computador_destino):
 
 
 def interfaceWiFiName(computador_destino):
+    psexec_path = r'C:\Windows\System32\PsExec.exe'
+
     # Comando psexec para descobrir o nome da interface Wi-Fi
-    comando = f"psexec -h \\\\{computador_destino} netsh interface show interface"
+    comando = f"{psexec_path} \\\\{computador_destino} netsh interface show interface"
     processo = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     saida, erro = processo.communicate()
     interface_wifi = str(saida.decode('latin1'))
@@ -44,19 +48,23 @@ def sendMessage(computador_destino):
 
 def installProgram(computador_destino):
     print('Escolha uma opção: ')
-    print('1-Instalar Java')
-    print('2-Instalar VNC')
-    print('3-Instalar Chrome')
-    print('4-Instalar Firefox')
+    print('1-Instalar Java.')
+    print('2-Instalar VNC.')
+    print('3-Instalar Chrome.')
+    print('4-Instalar Firefox.')
+    print('5-Listar programas instalados.')
+
     op = input('Escolha uma opção: ')
 
-    # nome_do_arquivo = input('Digite o nome do arquivo: ')
+    usuario_logado_destino = usuarioLogado(computador_destino)
+    winget_path = f'C:\\Users\\{usuario_logado_destino}\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe'
 
     install_option = {
-        '1': f'\\\\{computador_destino} winget install Oracle.JavaRuntimeEnvironment --silent',
-        '2': f'\\\\{computador_destino} winget install uvncbvba.UltraVnc --silent',
-        '3': f'\\\\{computador_destino} winget install Google.Chrome --silent',
-        '4': f'\\\\{computador_destino} winget install Mozilla.Firefox --silent'
+        '1': f'\\\\{computador_destino} {winget_path} install Oracle.JavaRuntimeEnvironment --silent',
+        '2': f'\\\\{computador_destino} {winget_path} install uvncbvba.UltraVnc --silent',
+        '3': f'\\\\{computador_destino} {winget_path} install Google.Chrome --silent',
+        '4': f'\\\\{computador_destino} {winget_path} install Mozilla.Firefox --silent',
+        '5': f'\\\\{computador_destino} {winget_path} list'
     }
 
     return install_option.get(op, 'Opção inválida.')
@@ -129,14 +137,41 @@ def copyTeamsForUserComputer(computador_destino):
 
 def disableInterfaceWiFi(computador_destino):
     wifi_name = interfaceWiFiName(computador_destino)
+
+    if wifi_name != 'Wi-Fi':
+        wifi_name = 'Wi-Fi'
+
     comando = f'\\\\{computador_destino} wmic path win32_networkadapter where NetConnectionID="{wifi_name}" call disable'
 
     return comando
 
 
+def copy_agent_glpi(computador_destino):
+    origem = r"\\10.42.0.38\humap\glpiagent\glpiagentinstall.vbs"
+    destino = f"\\\\{computador_destino}\\c$"
+
+    comando = f'xcopy "{origem}" "{destino}" /Y'
+
+    try:
+        processo = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        processo.communicate()
+
+        # Verifica se a cópia foi bem-sucedida
+        if processo.returncode == 0:
+            print('Cópia concluída com sucesso')
+        else:
+            print('Erro ao copiar o arquivo')
+            print(f'Saída de erro: {processo.stderr.read().decode("latin1")}')
+    except Exception as e:
+        print(f'Erro ao executar o comando: {e}')
+
+
 def GlpiInfo(computador_destino):
-    file_name = '{C22A4F1C-AE24-48D6-AC49-1B0D8D9572DF}'
-    comando = f'\\\\{computador_destino} C:\Windows\System32\GroupPolicy\DataStore\\0\SysVol\ebserhnet.ebserh.gov.br\Policies\\{file_name}\Machine\Scripts\Startup\glpiagentinstall.bat'
+    copy_agent_glpi(computador_destino)
+
+    time.sleep(3)
+
+    comando = f'\\\\{computador_destino} cscript "C:\\glpiagentinstall.vbs" && del "\\\\{computador_destino}\\c$\\glpiagentinstall.vbs"'
 
     return comando
 
@@ -164,15 +199,17 @@ def functionPsexec(option):
         '11': copyTeamsForUserComputer,
         '12': disableInterfaceWiFi,
         '13': GlpiInfo,
-        '14': getSerialNumber,
+        '14': getSerialNumber
     }
 
     return option_menu.get(option, lambda: 'Opção inválida.')(computador_destino)
 
 
 def finalizaProcesso(computador_destino, name):
+    psexec_path = r'C:\Windows\System32\PsExec.exe'
+
     # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
-    comando = f"psexec \\\\{computador_destino} taskkill /F /IM {name}.exe"
+    comando = f"{psexec_path} \\\\{computador_destino} taskkill /F /IM {name}.exe"
 
     # Executa o comando externo
     subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -205,10 +242,11 @@ def executaPsexec():
         else:
             _ = os.system('cls')
 
+            psexec_path = 'C:\\Windows\\System32\\PsExec.exe'
             comando_escolhido = functionPsexec(opcao)
 
             # Comando psexec com o usuário, senha, nome do computador e mensagem fornecidos
-            comando = f"psexec {comando_escolhido}"
+            comando = f"{psexec_path} {comando_escolhido}"
 
             # Executa o comando externo
             processo = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
