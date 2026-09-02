@@ -1,0 +1,15 @@
+{
+  "timeout_seconds": 60,
+  "psexec_path": "C:\\Windows\\System32\\PsExec.exe",
+  "glpi": {
+    "installer_source": "\\\\10.42.0.38\\humap\\glpiagent\\glpiagentinstall.vbs",
+    "remote_installer_path": "C:\\glpiagentinstall.vbs",
+    "service_names": ["glpi-agent", "GLPI-Agent"]
+  },
+  "software": {
+    "chrome": {"name": "Google Chrome", "winget_id": "Google.Chrome"},
+    "firefox": {"name": "Mozilla Firefox", "winget_id": "Mozilla.Firefox"},
+    "7zip": {"name": "7-Zip", "winget_id": "7zip.7zip"},
+    "vnc": {"name": "UltraVNC", "winget_id": "uvncbvba.UltraVnc"}
+  }
+}
