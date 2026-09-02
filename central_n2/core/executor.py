@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import socket
 import subprocess
 import time
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 from .logger import AuditLogger
 from .result import CommandResult
@@ -24,7 +25,8 @@ class RemoteExecutor:
     ) -> None:
         self.timeout = timeout
         self.logger = logger
-        self.psexec_path = psexec_path or self._discover_psexec()
+        configured = Path(psexec_path) if psexec_path else None
+        self.psexec_path = str(configured) if configured and configured.exists() else self._discover_psexec()
 
     @staticmethod
     def _discover_psexec() -> str | None:
@@ -47,31 +49,24 @@ class RemoteExecutor:
             return None
 
     def ping(self, host: str) -> CommandResult:
-        cmd = ["ping", "-n", "1", "-w", "1200", host]
-        return self._run_local(cmd, host=host, action="ping")
+        return self._run_local(["ping", "-n", "1", "-w", "1200", host], host=host, action="ping")
 
     def test_admin_share(self, host: str) -> CommandResult:
-        cmd = ["cmd.exe", "/d", "/c", f"dir \\\\{host}\\admin$ >nul 2>&1"]
-        return self._run_local(cmd, host=host, action="admin_share")
+        return self._run_local(
+            ["cmd.exe", "/d", "/c", f"dir \\\\{host}\\admin$ >nul 2>&1"],
+            host=host,
+            action="admin_share",
+        )
 
     def test_winrm(self, host: str) -> CommandResult:
-        script = (
-            f"$ErrorActionPreference='Stop'; "
-            f"Test-WSMan -ComputerName '{host}' | Out-Null; 'OK'"
-        )
+        safe_host = host.replace("'", "''")
+        script = f"$ErrorActionPreference='Stop'; Test-WSMan -ComputerName '{safe_host}' | Out-Null; 'OK'"
         return self._run_powershell_local(script, host=host, action="test_winrm", timeout=15)
 
     def execute_powershell(self, host: str, script: str, *, timeout: int | None = None) -> CommandResult:
-        wrapped = (
-            "$ErrorActionPreference='Stop'; "
-            f"Invoke-Command -ComputerName '{host}' -ScriptBlock {{ {script} }}"
-        )
-        result = self._run_powershell_local(
-            wrapped,
-            host=host,
-            action="powershell_remote",
-            timeout=timeout,
-        )
+        safe_host = host.replace("'", "''")
+        wrapped = f"$ErrorActionPreference='Stop'; Invoke-Command -ComputerName '{safe_host}' -ScriptBlock {{ {script} }}"
+        result = self._run_powershell_local(wrapped, host=host, action="powershell_remote", timeout=timeout)
         result.transport = "winrm"
         return result
 
@@ -113,14 +108,9 @@ class RemoteExecutor:
         return result
 
     def execute_cmd(self, host: str, command: str, *, timeout: int | None = None) -> CommandResult:
-        winrm = self.test_winrm(host)
-        if winrm.success:
+        if self.test_winrm(host).success:
             escaped = command.replace("'", "''")
-            return self.execute_powershell(
-                host,
-                f"cmd.exe /d /c '{escaped}'",
-                timeout=timeout,
-            )
+            return self.execute_powershell(host, f"cmd.exe /d /c '{escaped}'", timeout=timeout)
         return self.execute_psexec(host, "cmd.exe", ["/d", "/c", command], timeout=timeout)
 
     def execute_remote_powershell_with_fallback(
@@ -130,28 +120,14 @@ class RemoteExecutor:
         *,
         timeout: int | None = None,
     ) -> CommandResult:
-        winrm = self.test_winrm(host)
-        if winrm.success:
+        if self.test_winrm(host).success:
             return self.execute_powershell(host, script, timeout=timeout)
 
-        encoded = subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-Command",
-                "[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($args[0]))",
-                script,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if encoded.returncode != 0:
-            return CommandResult.failure(host, script, encoded.stderr, transport="local")
+        encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
         return self.execute_psexec(
             host,
             "powershell.exe",
-            ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded.stdout.strip()],
+            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
             timeout=timeout,
         )
 
@@ -200,12 +176,7 @@ class RemoteExecutor:
                 duration_ms=int((time.perf_counter() - started) * 1000),
             )
         except subprocess.TimeoutExpired:
-            result = CommandResult.failure(
-                host,
-                printable,
-                f"Timeout após {timeout or self.timeout}s",
-                return_code=124,
-            )
+            result = CommandResult.failure(host, printable, f"Timeout após {timeout or self.timeout}s", return_code=124)
             result.duration_ms = int((time.perf_counter() - started) * 1000)
         except OSError as exc:
             result = CommandResult.failure(host, printable, str(exc), return_code=127)
