@@ -1,0 +1,13 @@
+[project]
+name = "central-n2"
+version = "1.0.0"
+description = "Central de administração remota para suporte N2 em ambientes Windows"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
