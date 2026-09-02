@@ -1,0 +1,36 @@
+name: Central N2 Tests
+
+on:
+  push:
+    paths:
+      - 'central_n2/**'
+      - '.github/workflows/central-n2-tests.yml'
+  pull_request:
+    paths:
+      - 'central_n2/**'
+      - '.github/workflows/central-n2-tests.yml'
+
+jobs:
+  test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: central_n2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Compile Python files
+        run: python -m compileall .
+
+      - name: Run tests
+        run: python -m pytest -q
