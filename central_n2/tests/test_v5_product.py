@@ -1,8 +1,12 @@
+import json
+
+from core.config import ConfigLoader
 from core.progress import ProgressParser
 from core.updater import UpdateManager
 from modules.compliance import evaluate_compliance
 from core.result import CommandResult
 from remediation import RemediationEngine, RemediationSpec
+from reports import ReportExporter
 def test_progress_parser_reads_dism_percent():
     assert ProgressParser.parse("[================  62.5% ]").percent==62.5
 def test_version_comparison():
@@ -33,3 +37,39 @@ def test_remediation_engine_collects_before_and_after():
     assert result.command_result.success is True
     assert result.before["DiskFreePercent"] == 5
     assert result.after["DiskFreePercent"] == 20
+
+
+def test_config_loader_applies_local_override(tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    settings = config_dir / "settings.json"
+    local = config_dir / "settings.local.json"
+    settings.write_text(
+        json.dumps({"runtime": {"max_workers": 4}, "glpi_api": {"enabled": False}}),
+        encoding="utf-8",
+    )
+    local.write_text(
+        json.dumps({"runtime": {"max_workers": 8}, "glpi_api": {"enabled": True}}),
+        encoding="utf-8",
+    )
+
+    loaded = ConfigLoader(settings).settings
+    assert loaded["runtime"]["max_workers"] == 8
+    assert loaded["glpi_api"]["enabled"] is True
+
+
+def test_markdown_report_contains_correlation_id(tmp_path):
+    report = {
+        "correlation_id": "ATD123",
+        "host": "PC01",
+        "user": "usuario",
+        "generated_at": "2026-09-03T18:00:00-04:00",
+        "problem": "teste",
+        "diagnosis": "ok",
+        "actions": [],
+        "validation": "ok",
+        "result": "ok",
+    }
+    path = ReportExporter(tmp_path).export(report, fmt="markdown", stem="r")
+    text = path.read_text(encoding="utf-8")
+    assert "ATD123" in text
