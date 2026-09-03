@@ -1,8 +1,9 @@
 {
   "timeout_seconds": 60,
   "psexec_path": "C:\\Windows\\System32\\PsExec.exe",
+  "sysinternals_dir": "C:\\Sysinternals",
   "glpi": {
-    "installer_source": "\\\\10.42.0.38\\humap\\glpiagent\\glpiagentinstall.vbs",
+    "installer_source": "",
     "remote_installer_path": "C:\\glpiagentinstall.vbs",
     "service_names": ["glpi-agent", "GLPI-Agent"]
   },
@@ -19,5 +20,9 @@
     "firewall_required": true,
     "glpi_required": true,
     "pending_reboot_not_allowed": true
+  },
+  "ui": {
+    "heartbeat_seconds": 0.2,
+    "long_operation_timeout_seconds": 3600
   }
 }
