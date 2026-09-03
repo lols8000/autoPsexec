@@ -28,12 +28,12 @@ class ConsoleUIV5(ConsoleUIV3):
         self.job_manager.set_observer(self.db.save_job if self.db else None)
         self.active_baseline_profile=str(self.settings.get("compliance",{}).get("profile","DEFAULT")).upper()
         self.engine=DiagnosticEngine();self.correlator=CorrelationEngine();self.playbook_runner=PlaybookRunner();self.playbooks=builtin_playbooks();self.remediation_engine=RemediationEngine();self.report_builder=SupportReportBuilder();self.report_exporter=ReportExporter(settings_path.parent.parent/"reports"/"support")
-        cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.update_dir=settings_path.parent.parent/"updates";self.last_diagnoses=[];self.last_playbook=None;self.last_report_path=None
+        cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.update_dir=settings_path.parent.parent/"updates";self.last_diagnoses=[];self.last_playbook=None;self.last_remediation=None;self.last_report_path=None
     def run(self):
         try:
             while True:
                 self.clear();print("╔════════════════════════════════════════════════════╗");print(f"║ CENTRAL N2 WORKSTATION — V{__version__:<24}║");print("╚════════════════════════════════════════════════════╝");transport=self.executor.select_transport(self.host) if self.host else "-";print(f"\nAlvo: {self.host or 'nenhum'} | Transporte: {transport}")
-                lines=["[1] Selecionar estação","[2] Saúde / Compliance","[3] Performance","[4] Reparo do Windows","[5] Hardware / Drivers / Dispositivos","[6] Inicialização / Tarefas","[7] Crashes / BSOD","[8] Segurança","[9] Rede","[10] Usuários / Perfis","[11] Software / GLPI Agent","[12] Impressoras","[13] Domínio / GPO","[14] Disco / Armazenamento / Bateria","[15] Ferramentas avançadas","[16] Sysinternals","[17] Pacote de diagnóstico","[18] Energia / Processos / Serviços","[19] Conectividade / Capabilities","[20] Assistente N2 / Playbooks","[21] Histórico / Diff","[22] Gerar relatório","[23] Jobs","[24] Atualização da Central","[25] GLPI API","[0] Sair"]
+                lines=["[1] Selecionar estação","[2] Saúde / Compliance","[3] Performance","[4] Reparo do Windows","[5] Hardware / Drivers / Dispositivos","[6] Inicialização / Tarefas","[7] Crashes / BSOD","[8] Segurança","[9] Rede","[10] Usuários / Perfis","[11] Software / GLPI Agent","[12] Impressoras","[13] Domínio / GPO","[14] Disco / Armazenamento / Bateria","[15] Ferramentas avançadas","[16] Sysinternals","[17] Pacote de diagnóstico","[18] Energia / Processos / Serviços","[19] Conectividade / Capabilities","[20] Assistente N2 / Playbooks","[21] Histórico / Diff","[22] Gerar relatório","[23] Jobs","[24] Atualização da Central","[25] GLPI API","[26] Remediações guiadas","[27] Perfil / Baseline","[0] Sair"]
                 for line in lines:print(line)
                 op=input("\nOpção: ").strip();handlers={"1":self.select_host,"2":self.menu_health,"3":self.menu_performance,"4":self.menu_repair,"5":self.menu_devices,"6":self.menu_startup_tasks,"7":self.menu_crashes,"8":self.menu_security,"9":self.menu_network,"10":self.menu_users,"11":self.menu_software_glpi,"12":self.menu_printers,"13":self.menu_domain,"14":self.menu_storage,"15":self.menu_tools,"16":self.menu_sysinternals,"17":self.collect_diagnostic,"18":self.menu_system,"19":self.menu_connectivity,"20":self.menu_playbooks,"21":self.menu_history,"22":self.menu_report,"23":self.menu_jobs,"24":self.menu_update,"25":self.menu_glpi_api,"26":self.menu_remediations,"27":self.menu_baseline}
                 if op=="0":return
@@ -157,12 +157,25 @@ class ConsoleUIV5(ConsoleUIV3):
     def menu_report(self):
         if not self.require_host():return
         self.clear();problem=input("Problema/resumo do chamado: ").strip();diag="; ".join(f"{d.title} ({d.confidence})" for d in self.last_diagnoses) or "Sem diagnóstico correlacionado registrado.";actions=[x["label"] for x in self.last_playbook.steps if x.get("success")] if self.last_playbook else []
-        report=self.report_builder.build(host=self.host,user=(self.health_snapshot or {}).get("User"),problem=problem,diagnosis=diag,actions=actions,validation=self.health_snapshot,result="Diagnóstico/atendimento registrado");stamp=datetime.now().strftime("%Y%m%d_%H%M%S");path=self.report_exporter.export(report,fmt="markdown",stem=f"{self.host}_{stamp}");self.report_exporter.export(report,fmt="json",stem=f"{self.host}_{stamp}");self.last_report_path=path
+        if self.last_remediation:
+            actions.append(f"Remediação: {self.last_remediation.spec.title} — {'sucesso' if self.last_remediation.command_result.success else 'falha'}")
+        validation=self.last_remediation.after if self.last_remediation and self.last_remediation.after is not None else self.health_snapshot
+        report=self.report_builder.build(host=self.host,user=(self.health_snapshot or {}).get("User"),problem=problem,diagnosis=diag,actions=actions,validation=validation,result="Diagnóstico/atendimento registrado");stamp=datetime.now().strftime("%Y%m%d_%H%M%S");path=self.report_exporter.export(report,fmt="markdown",stem=f"{self.host}_{stamp}");self.report_exporter.export(report,fmt="json",stem=f"{self.host}_{stamp}");self.last_report_path=path
         if self.db:self.db.save_report(self.host,"markdown",path.read_text(encoding="utf-8"),path=str(path))
         print(f"✓ Relatório: {path}");self.pause()
     def menu_jobs(self):
         self.clear()
-        for r in self.job_manager.list_records()[-30:]:print(f"{r.job_id} | {r.host} | {r.state.value} | {r.operation_class.value} | {r.elapsed_seconds:.1f}s | {r.label}")
+        print("JOBS DA SESSÃO")
+        records=self.job_manager.list_records()[-30:]
+        if not records:
+            print("Nenhum job nesta sessão.")
+        for record in records:
+            print(f"{record.job_id} | {record.host} | {record.state.value} | {record.operation_class.value} | {record.elapsed_seconds:.1f}s | {record.label}")
+
+        if self.db:
+            print("\nÚLTIMOS JOBS PERSISTIDOS")
+            for item in self.db.recent_jobs(self.host,limit=15):
+                print(f"{item['job_id']} | {item['host']} | {item['state']} | {item['label']}")
         self.pause()
     def menu_update(self):
         self.clear()
@@ -284,6 +297,7 @@ class ConsoleUIV5(ConsoleUIV3):
             self.pause()
             return
 
+        self.last_remediation=remediation
         result=remediation.command_result
         self.show_result(result)
         changes=diff_values(remediation.before,remediation.after) if remediation.after is not None else []
