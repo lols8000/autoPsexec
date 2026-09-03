@@ -41,7 +41,7 @@ class ConnectivityDiagnostics:
         ping = self.executor.ping(host)
         winrm = self.executor.test_winrm(host)
         admin = self.executor.test_admin_share(host)
-        selected = self.executor.select_transport(host, refresh=True)
+        selected = self.executor.select_transport(host, refresh=True, winrm_result=winrm)
         diagnosis = "Conectividade administrativa disponível."
         if not dns_ok:
             diagnosis = "Falha de resolução DNS."
