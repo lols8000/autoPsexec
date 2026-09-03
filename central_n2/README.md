@@ -1,68 +1,147 @@
-# Central de Manutenção N2 — Estações Windows
+# Central N2 Workstation — Guia rápido
 
-Central modular para diagnóstico, manutenção e troubleshooting remoto de estações Windows. A v3 mantém o foco exclusivamente em workstation e adiciona uma camada responsiva para que operações longas não deixem o suporte sem feedback visual.
+Este README é o guia rápido da aplicação localizada em `central_n2/`.
 
-## Destaques da v3
+Para visão completa do projeto, consulte o [`README.md` da raiz](../README.md). Para detalhes técnicos, consulte [`docs/README.md`](docs/README.md).
 
-- execução de operações bloqueantes em worker threads;
-- heartbeat visual contínuo com tempo decorrido;
-- timeout padronizado para evitar espera indefinida;
-- resultado final sempre exibido como sucesso, falha ou timeout;
-- encerramento controlado do pool de workers;
-- módulos novos de reparo do Windows, performance, drivers/dispositivos, startup, tarefas agendadas, crashes/BSOD, armazenamento/bateria e ferramentas avançadas;
-- integração opcional com Sysinternals já instalado na estação;
-- configuração pública sanitizada, sem caminho interno do ambiente versionado.
+---
 
-## Execução
+## Versão operacional atual
+
+**Central N2 Workstation v3 responsiva**
+
+Características centrais:
+
+- foco exclusivo em estações Windows;
+- WinRM como transporte preferencial;
+- PsExec como fallback;
+- operações longas em worker threads;
+- heartbeat visual e tempo decorrido;
+- timeout padronizado;
+- saúde/compliance;
+- troubleshooting avançado;
+- Sysinternals opcional;
+- logging/auditoria local.
+
+---
+
+## Requisitos
+
+- Windows 10/11 ou Windows Server na estação administrativa;
+- Python 3.10+;
+- privilégios administrativos;
+- conectividade com estações alvo;
+- WinRM/PowerShell Remoting preferencialmente configurado;
+- PsExec disponível para fallback quando necessário;
+- Sysinternals opcional;
+- pytest somente para desenvolvimento/testes.
+
+O runtime Python não possui dependências externas obrigatórias.
+
+---
+
+## Estrutura
+
+```text
+central_n2/
+├── main.py
+├── README.md
+├── config/
+│   └── settings.json
+├── core/
+│   ├── executor.py
+│   ├── jobs.py
+│   ├── logger.py
+│   └── result.py
+├── modules/
+├── ui/
+│   ├── console.py
+│   └── console_v3.py
+├── tests/
+├── docs/
+├── logs/
+└── reports/
+```
+
+`ui/console_v3.py` é a interface atual. `ui/console.py` permanece como referência da geração anterior.
+
+---
+
+## Configuração inicial
+
+Edite:
+
+```text
+config/settings.json
+```
+
+Configuração padrão atual:
+
+```json
+{
+  "timeout_seconds": 60,
+  "psexec_path": "C:\\Windows\\System32\\PsExec.exe",
+  "sysinternals_dir": "C:\\Sysinternals",
+  "glpi": {
+    "installer_source": "",
+    "remote_installer_path": "C:\\glpiagentinstall.vbs",
+    "service_names": ["glpi-agent", "GLPI-Agent"]
+  },
+  "software": {
+    "chrome": {"name": "Google Chrome", "winget_id": "Google.Chrome"},
+    "firefox": {"name": "Mozilla Firefox", "winget_id": "Mozilla.Firefox"},
+    "7zip": {"name": "7-Zip", "winget_id": "7zip.7zip"},
+    "vnc": {"name": "UltraVNC", "winget_id": "uvncbvba.UltraVnc"}
+  },
+  "compliance": {
+    "min_disk_free_percent": 15,
+    "max_uptime_days": 30,
+    "defender_required": true,
+    "firewall_required": true,
+    "glpi_required": true,
+    "pending_reboot_not_allowed": true
+  },
+  "ui": {
+    "heartbeat_seconds": 0.2,
+    "long_operation_timeout_seconds": 3600
+  }
+}
+```
+
+O campo `glpi.installer_source` vem vazio porque o repositório é público. Configure o caminho real apenas no ambiente operacional e não publique credenciais ou informações internas.
+
+Detalhes: [`docs/configuration.md`](docs/configuration.md).
+
+---
+
+## Iniciar
+
+A partir da raiz do repositório:
 
 ```powershell
 python .\central_n2\main.py
 ```
 
-A aplicação solicita elevação UAC quando necessário.
+Ou dentro da pasta:
 
-## Feedback visual
-
-Toda ação iniciada pela interface v3 passa pelo `ResponsiveJobRunner`.
-
-Durante a execução o suporte vê algo semelhante a:
-
-```text
-| DISM RestoreHealth...   4.2s
-/ DISM RestoreHealth...   8.7s
-- DISM RestoreHealth...  15.3s
+```powershell
+cd central_n2
+python .\main.py
 ```
 
-Ao concluir:
+A aplicação solicita elevação administrativa quando necessário.
+
+---
+
+## Menu atual
 
 ```text
-✓ SUCESSO [winrm] — 18432 ms
-```
+╔════════════════════════════════════════════════════╗
+║        CENTRAL N2 WORKSTATION — V3 RESPONSIVA     ║
+╚════════════════════════════════════════════════════╝
 
-Em falha:
+Alvo: nenhum
 
-```text
-✗ FALHA [psexec]
-Erro: ...
-```
-
-Se exceder o limite configurado:
-
-```text
-✗ TIMEOUT: Operação '...' excedeu ...s
-```
-
-O heartbeat não significa que o comando remoto está produzindo saída a cada instante; ele confirma que a Central continua viva enquanto aguarda o worker remoto.
-
-## Concorrência
-
-A v3 usa `ThreadPoolExecutor` para operações I/O-bound e remotas. Isso faz sentido porque a maior parte do tempo é gasta aguardando WinRM, PsExec, PowerShell, rede ou processos do Windows, e não consumindo CPU Python.
-
-A interface usa threads para manter responsividade. Ações em lote continuam com concorrência limitada para não sobrecarregar rede ou endpoints.
-
-## Menu v3
-
-```text
 [1] Selecionar estação
 [2] Saúde / Compliance
 [3] Performance
@@ -81,160 +160,205 @@ A interface usa threads para manter responsividade. Ações em lote continuam co
 [16] Sysinternals
 [17] Pacote de diagnóstico
 [18] Energia / Processos / Serviços
+[0] Sair
 ```
 
-## Reparo do Windows
+---
 
-Disponível com retorno visual e timeout longo:
+## Feedback visual
 
-- `sfc /scannow`;
-- DISM CheckHealth;
-- DISM ScanHealth;
-- DISM RestoreHealth;
-- análise e limpeza do Component Store;
-- CHKDSK online;
-- verificação de consistência do repositório WMI.
+Operações bloqueantes são executadas por `ResponsiveJobRunner`.
 
-Ações de maior impacto continuam exigindo confirmação.
+Exemplo:
 
-## Performance
+```text
+| DISM RestoreHealth...   4.2s
+/ DISM RestoreHealth...   8.7s
+```
 
-A Central pode coletar amostras por alguns segundos e retornar:
+O spinner indica que a Central continua executando/aguardando. Não é porcentagem de progresso.
 
-- CPU média e pico;
-- RAM utilizada;
-- atividade média de disco;
-- throughput de rede aproximado;
-- processos com maior CPU;
-- processos com maior uso de memória.
+### Sucesso
 
-A coleta usa amostragem limitada e não mantém monitoramento permanente em background.
+```text
+✓ SUCESSO [winrm] — 7524 ms
+```
 
-## Drivers e dispositivos
+### Falha
 
-- dispositivos com erro no Plug and Play;
-- código de erro do Device Manager;
-- inventário de drivers assinados;
-- dispositivos USB presentes;
-- `pnputil /scan-devices`;
-- exportação de drivers.
+```text
+✗ FALHA [psexec]
+Erro: Access denied
+```
 
-## Inicialização e tarefas
+### Timeout
 
-- Run/Startup via WMI e Registro;
-- tarefas agendadas;
-- tarefas com último resultado diferente de zero;
-- serviços automáticos parados.
+```text
+✗ TIMEOUT
+Operação 'DISM RestoreHealth' excedeu 3600s
+```
 
-## Crashes e BSOD
+**Atenção:** timeout local não garante interrupção de processo remoto já iniciado.
 
-- eventos BugCheck;
-- conteúdo de `C:\Windows\Minidump`;
-- presença de `MEMORY.DMP`;
-- eventos de crash de aplicações.
+---
 
-## Segurança
+## Transportes
 
-- Defender;
-- proteção em tempo real;
-- assinatura do antivírus;
-- Firewall;
-- BitLocker;
-- TPM;
-- Secure Boot;
-- RDP;
-- SMBv1;
-- UAC;
-- ameaças recentes.
+### Preferencial
 
-A Central não oferece botão para desativar Defender ou Firewall.
+```text
+PowerShell Remoting / WinRM
+```
 
-## Armazenamento e bateria
+### Fallback
 
-- volumes e espaço livre;
-- discos físicos;
-- status/saúde quando exposto pelo Windows;
-- tipo de mídia e barramento;
-- bateria;
-- capacidade projetada e carga total quando suportado;
-- cálculo de saúde da bateria;
-- ciclos quando o firmware expõe a informação.
+```text
+PsExec
+```
 
-## Ferramentas avançadas
+Fluxo conceitual:
 
-- certificados da máquina e certificados expirando;
-- unidades mapeadas;
-- compartilhamentos locais;
-- proxy WinHTTP/usuário;
-- status de ativação do Windows;
-- logons recentes.
+```text
+Módulo
+  ↓
+RemoteExecutor
+  ↓
+WinRM disponível?
+  ├─ sim → PowerShell Remoting
+  └─ não → PsExec
+```
 
-## Sysinternals opcional
+---
 
-Por padrão a Central procura em:
+## Principais módulos
+
+| Área | Arquivo |
+|---|---|
+| Saúde | `modules/health.py` |
+| Compliance | `modules/compliance.py` |
+| Diagnóstico | `modules/diagnostics.py` |
+| Performance | `modules/performance.py` |
+| Reparo Windows | `modules/repair.py` |
+| Drivers/dispositivos | `modules/devices.py` |
+| Inicialização | `modules/startup.py` |
+| Tarefas | `modules/tasks.py` |
+| Crashes/BSOD | `modules/crashes.py` |
+| Segurança | `modules/security.py` |
+| Rede | `modules/network.py` |
+| Usuários/perfis | `modules/users_profiles.py` |
+| Software | `modules/software.py` |
+| GLPI | `modules/glpi.py` |
+| Impressoras | `modules/printers.py` |
+| Domínio/GPO | `modules/domain.py` |
+| Disco/limpeza | `modules/disk.py` |
+| Storage/bateria | `modules/storage.py` |
+| Ferramentas avançadas | `modules/workstation_tools.py` |
+| Sysinternals | `modules/sysinternals.py` |
+| Pacote diagnóstico | `modules/diagnostic_package.py` |
+| Sistema | `modules/system.py` |
+| Windows Update | `modules/updates.py` |
+
+Descrição detalhada: [`docs/modules.md`](docs/modules.md).
+
+---
+
+## Sysinternals
+
+Diretório padrão:
 
 ```text
 C:\Sysinternals
 ```
 
-O diretório é configurável em `config/settings.json`.
+Integrações atuais:
 
-Ferramentas integradas quando presentes:
+- Autorunsc;
+- ProcDump;
+- Handle;
+- Sigcheck.
 
-- `autorunsc.exe` — inventário avançado de inicialização;
-- `procdump.exe` — captura de dump de processo;
-- `handle.exe` — localizar arquivo/objeto aberto;
-- `sigcheck.exe` — assinatura e hash;
-- inventário de PsPing, PsLoggedOn, RAMMap e Procmon para expansão futura.
+A Central não baixa essas ferramentas automaticamente.
 
-A Central não baixa executáveis automaticamente.
+---
 
-## Configuração
+## GLPI
 
-Arquivo principal:
-
-```text
-central_n2/config/settings.json
-```
-
-Parâmetros relevantes da v3:
+Antes de usar instalação/reparo, defina localmente:
 
 ```json
-{
-  "sysinternals_dir": "C:\\Sysinternals",
-  "ui": {
-    "heartbeat_seconds": 0.2,
-    "long_operation_timeout_seconds": 3600
-  }
-}
+"installer_source": "\\\\servidor\\share\\glpiagentinstall.vbs"
 ```
 
-O `glpi.installer_source` versionado fica vazio de propósito. Configure o caminho apropriado ao ambiente antes de usar instalação/reparo do agente.
+O valor não deve ser commitado no repositório público quando revelar infraestrutura interna.
+
+---
+
+## Logs
+
+Logs administrativos:
+
+```text
+logs/YYYY-MM-DD.jsonl
+```
+
+Não versione logs reais.
+
+---
+
+## Relatórios
+
+Pacotes de diagnóstico:
+
+```text
+reports/diagnostics/
+```
+
+Esses arquivos podem conter dados internos da estação e devem ser protegidos.
+
+---
 
 ## Testes
 
 ```powershell
 cd central_n2
 python -m pip install pytest
+python -m compileall .
 python -m pytest -q
 ```
 
-O workflow do GitHub Actions também executa:
+O CI executa compilação e pytest em Windows.
 
-- compilação de todos os arquivos Python;
-- testes centrais;
-- saúde/compliance;
-- runner responsivo;
-- heartbeat;
-- timeout;
-- compatibilidade da API dos módulos usados pela interface v3.
+---
 
-## Princípios de operação
+## Operação segura
 
-1. Toda operação longa precisa mostrar que a Central continua viva.
-2. A interface não deve congelar aguardando I/O remoto.
-3. Timeout deve existir em toda operação potencialmente bloqueante.
-4. Ações destrutivas continuam exigindo confirmação explícita.
-5. Threads são usadas para I/O e operações remotas; não para paralelizar indiscriminadamente tarefas destrutivas.
-6. A ferramenta deve retornar evidência suficiente para o suporte registrar o atendimento.
-7. Falha de ferramenta opcional não deve derrubar a Central inteira.
+Fluxo recomendado:
+
+```text
+Saúde
+ ↓
+Diagnóstico
+ ↓
+Confirmar causa
+ ↓
+Remediar
+ ↓
+Validar
+ ↓
+Gerar evidência
+```
+
+Evite usar SFC, DISM, reset de rede ou reboot como sequência automática para qualquer problema.
+
+---
+
+## Documentação completa
+
+- [`docs/README.md`](docs/README.md) — índice
+- [`docs/architecture.md`](docs/architecture.md) — arquitetura
+- [`docs/modules.md`](docs/modules.md) — módulos
+- [`docs/configuration.md`](docs/configuration.md) — configuração
+- [`docs/operations.md`](docs/operations.md) — manual do suporte
+- [`docs/security.md`](docs/security.md) — segurança
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) — troubleshooting
+- [`docs/development.md`](docs/development.md) — desenvolvimento
