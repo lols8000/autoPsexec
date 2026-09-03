@@ -1,3 +1,14 @@
+# Central N2 — Guia rápido v5
+
+Versão: 5.0.0
+Console: python main.py
+GUI: python main.py --gui
+Configuração local: copie config/settings.local.example.json para config/settings.local.json e nunca versione segredos.
+
+A v5 detecta automaticamente quando o alvo é a própria máquina e usa transporte local, sem exigir WinRM. Destinos remotos usam WinRM preferencialmente e PsExec como fallback de transporte.
+
+---
+
 # Central N2 Workstation — Guia rápido
 
 Este README é o guia rápido da aplicação localizada em `central_n2/`.

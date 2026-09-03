@@ -1,3 +1,11 @@
+# Central N2 Workstation v5
+
+> Versão atual: 5.0.0 — arquitetura Local → WinRM → PsExec, diagnóstico correlacionado, playbooks, histórico SQLite, GLPI API opcional, GUI e pipeline de release.
+
+Consulte central_n2/docs/v5_complete.md e central_n2/CHANGELOG.md.
+
+---
+
 # Central N2 Workstation
 
 Central de manutenção, diagnóstico e troubleshooting remoto para **estações de trabalho Windows**, desenvolvida para rotinas de suporte N2.
