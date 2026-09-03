@@ -33,9 +33,9 @@ jobs:
         run: choco install innosetup -y
       - name: Build installer
         shell: pwsh
-        run: '& "\${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\CentralN2.iss'
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\CentralN2.iss'
       - name: Publish GitHub Release
         shell: pwsh
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: gh release create $env:GITHUB_REF_NAME dist\CentralN2-win64.zip installer\Output\CentralN2-Setup.exe --generate-notes --title "Central N2 $env:GITHUB_REF_NAME"
