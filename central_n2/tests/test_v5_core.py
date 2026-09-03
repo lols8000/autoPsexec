@@ -4,11 +4,15 @@ import socket
 import threading
 import time
 
+import pytest
+
 from core.config import deep_merge
+from core.connectivity import ConnectivityDiagnostics
 from core.host_identity import HostIdentity
-from core.jobs import JobManager, OperationClass
+from core.jobs import JobManager, JobState, OperationClass
 from core.result import CommandResult
 from core.transport.manager import TransportManager
+from storage.database import CentralDatabase
 
 
 class FakeTransport:
@@ -90,5 +94,68 @@ def test_job_manager_serializes_writes_per_host():
         assert f1.result(timeout=1) == "a"
         assert f2.result(timeout=1) == "b"
         assert max_active == 1
+    finally:
+        manager.shutdown()
+
+
+class LocalOnlyExecutor:
+    psexec_path = None
+
+    def test_winrm(self, host):
+        raise AssertionError("WinRM não deve ser consultado para alvo local")
+
+    def test_admin_share(self, host):
+        raise AssertionError("ADMIN$ não deve ser consultado para alvo local")
+
+    def ping(self, host):
+        raise AssertionError("Ping externo não deve ser necessário para alvo local")
+
+    def select_transport(self, host, refresh=False):
+        return "local"
+
+
+def test_connectivity_local_skips_remote_probes():
+    report = ConnectivityDiagnostics(LocalOnlyExecutor()).run("localhost")
+    assert report["is_local"] is True
+    assert report["selected_transport"] == "local"
+    assert report["winrm"] is None
+    assert report["admin_share"] is None
+
+
+def test_job_observer_persists_final_state(tmp_path):
+    database = CentralDatabase(tmp_path / "central.db")
+    manager = JobManager(
+        max_workers=1,
+        heartbeat_seconds=0.01,
+        observer=database.save_job,
+    )
+    try:
+        record, future = manager.submit(
+            "PC01",
+            "coleta",
+            lambda: "ok",
+            operation_class=OperationClass.READ_ONLY,
+        )
+        assert future.result(timeout=1) == "ok"
+        rows = database.recent_jobs("PC01", limit=1)
+        assert rows[0]["job_id"] == record.job_id
+        assert rows[0]["state"] == JobState.SUCCESS.value
+    finally:
+        manager.shutdown()
+
+
+def test_timeout_state_is_not_overwritten_by_late_worker():
+    manager = JobManager(max_workers=1, heartbeat_seconds=0.01)
+    try:
+        with pytest.raises(TimeoutError):
+            manager.run_sync(
+                "PC01",
+                "demorado",
+                lambda: time.sleep(0.08),
+                timeout=0.02,
+            )
+        time.sleep(0.10)
+        record = manager.list_records()[-1]
+        assert record.state == JobState.TIMEOUT
     finally:
         manager.shutdown()
