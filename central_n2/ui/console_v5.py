@@ -3,9 +3,11 @@ import json
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 from core.baselines import BaselineRepository
 from core.config import ConfigLoader,deep_merge
 from core.jobs import JobManager,OperationClass
+from core.result import CommandResult
 from core.session import SessionManager
 from core.updater import UpdateManager
 from core.version import __version__
@@ -14,23 +16,26 @@ from diagnostics.correlation import CorrelationEngine
 from integrations.glpi.client import GLPIClient,GLPIError
 from modules.compliance import evaluate_compliance
 from playbooks import PlaybookRunner,builtin_playbooks
+from remediation import RemediationEngine,RemediationSpec
 from reports import ReportExporter,SupportReportBuilder
-from storage import CentralDatabase
+from storage import CentralDatabase,diff_values
 from ui.console_v3 import ConsoleUIV3
 class ConsoleUIV5(ConsoleUIV3):
     def __init__(self,executor,settings_path:Path)->None:
         super().__init__(executor,settings_path);self.settings=ConfigLoader(settings_path).settings;runtime=self.settings.get("runtime",{})
         self.job_manager=JobManager(max_workers=int(runtime.get("max_workers",6)),heartbeat_seconds=float(self.settings.get("ui",{}).get("heartbeat_seconds",.2)));self.sessions=SessionManager(executor);self.baselines=BaselineRepository(settings_path.parent.parent/"baselines")
         persistence=self.settings.get("persistence",{});db_path=Path(persistence.get("database","data/central_n2.db"));db_path=db_path if db_path.is_absolute() else settings_path.parent.parent/db_path;self.db=CentralDatabase(db_path) if persistence.get("enabled",True) else None
-        self.engine=DiagnosticEngine();self.correlator=CorrelationEngine();self.playbook_runner=PlaybookRunner();self.playbooks=builtin_playbooks();self.report_builder=SupportReportBuilder();self.report_exporter=ReportExporter(settings_path.parent.parent/"reports"/"support")
-        cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.last_diagnoses=[];self.last_playbook=None;self.last_report_path=None
+        self.job_manager.set_observer(self.db.save_job if self.db else None)
+        self.active_baseline_profile=str(self.settings.get("compliance",{}).get("profile","DEFAULT")).upper()
+        self.engine=DiagnosticEngine();self.correlator=CorrelationEngine();self.playbook_runner=PlaybookRunner();self.playbooks=builtin_playbooks();self.remediation_engine=RemediationEngine();self.report_builder=SupportReportBuilder();self.report_exporter=ReportExporter(settings_path.parent.parent/"reports"/"support")
+        cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.update_dir=settings_path.parent.parent/"updates";self.last_diagnoses=[];self.last_playbook=None;self.last_report_path=None
     def run(self):
         try:
             while True:
                 self.clear();print("╔════════════════════════════════════════════════════╗");print(f"║ CENTRAL N2 WORKSTATION — V{__version__:<24}║");print("╚════════════════════════════════════════════════════╝");transport=self.executor.select_transport(self.host) if self.host else "-";print(f"\nAlvo: {self.host or 'nenhum'} | Transporte: {transport}")
                 lines=["[1] Selecionar estação","[2] Saúde / Compliance","[3] Performance","[4] Reparo do Windows","[5] Hardware / Drivers / Dispositivos","[6] Inicialização / Tarefas","[7] Crashes / BSOD","[8] Segurança","[9] Rede","[10] Usuários / Perfis","[11] Software / GLPI Agent","[12] Impressoras","[13] Domínio / GPO","[14] Disco / Armazenamento / Bateria","[15] Ferramentas avançadas","[16] Sysinternals","[17] Pacote de diagnóstico","[18] Energia / Processos / Serviços","[19] Conectividade / Capabilities","[20] Assistente N2 / Playbooks","[21] Histórico / Diff","[22] Gerar relatório","[23] Jobs","[24] Atualização da Central","[25] GLPI API","[0] Sair"]
                 for line in lines:print(line)
-                op=input("\nOpção: ").strip();handlers={"1":self.select_host,"2":self.menu_health,"3":self.menu_performance,"4":self.menu_repair,"5":self.menu_devices,"6":self.menu_startup_tasks,"7":self.menu_crashes,"8":self.menu_security,"9":self.menu_network,"10":self.menu_users,"11":self.menu_software_glpi,"12":self.menu_printers,"13":self.menu_domain,"14":self.menu_storage,"15":self.menu_tools,"16":self.menu_sysinternals,"17":self.collect_diagnostic,"18":self.menu_system,"19":self.menu_connectivity,"20":self.menu_playbooks,"21":self.menu_history,"22":self.menu_report,"23":self.menu_jobs,"24":self.menu_update,"25":self.menu_glpi_api}
+                op=input("\nOpção: ").strip();handlers={"1":self.select_host,"2":self.menu_health,"3":self.menu_performance,"4":self.menu_repair,"5":self.menu_devices,"6":self.menu_startup_tasks,"7":self.menu_crashes,"8":self.menu_security,"9":self.menu_network,"10":self.menu_users,"11":self.menu_software_glpi,"12":self.menu_printers,"13":self.menu_domain,"14":self.menu_storage,"15":self.menu_tools,"16":self.menu_sysinternals,"17":self.collect_diagnostic,"18":self.menu_system,"19":self.menu_connectivity,"20":self.menu_playbooks,"21":self.menu_history,"22":self.menu_report,"23":self.menu_jobs,"24":self.menu_update,"25":self.menu_glpi_api,"26":self.menu_remediations,"27":self.menu_baseline}
                 if op=="0":return
                 if op in handlers:handlers[op]()
         finally:self.jobs.shutdown();self.job_manager.shutdown()
@@ -44,7 +49,49 @@ class ConsoleUIV5(ConsoleUIV3):
         if r and r.success and isinstance(r.data,dict):self.health_snapshot=r.data;self.show_health(r.data);self._persist_health(r.data)
         self.pause()
     def _baseline(self):
-        cfg=self.settings.get("compliance",{});return deep_merge(self.baselines.load(str(cfg.get("profile","DEFAULT"))),cfg)
+        cfg=self.settings.get("compliance",{})
+        effective=dict(cfg)
+        effective["profile"]=self.active_baseline_profile
+        return deep_merge(self.baselines.load(self.active_baseline_profile),effective)
+
+    @staticmethod
+    def _classify_operation(label:str)->OperationClass:
+        value=label.lower()
+        if any(key in value for key in ("deslig","reinicialização","reiniciar estação")):
+            return OperationClass.DISRUPTIVE
+        if any(key in value for key in ("dism","sfc","chkdsk","component store","reset", "limpeza")):
+            return OperationClass.HEAVY_WRITE
+        if any(key in value for key in ("gpupdate","flush dns","renovar dhcp","spooler","forçando inventário","enviando mensagem","reexaminando","exportando drivers")):
+            return OperationClass.LIGHT_WRITE
+        return OperationClass.READ_ONLY
+
+    def execute(
+        self,
+        label:str,
+        func:Callable[[],CommandResult],
+        *,
+        timeout:int|None=None,
+        operation_class:OperationClass|None=None,
+    )->CommandResult|None:
+        print(f"\n▶ {label}")
+        op_class=operation_class or self._classify_operation(label)
+        target=self.host or "local-ui"
+        try:
+            result=self.job_manager.run_sync(
+                target,
+                label,
+                func,
+                operation_class=op_class,
+                timeout=timeout or self.long_timeout,
+            )
+        except TimeoutError as exc:
+            print(f"\n✗ TIMEOUT: {exc}")
+            return None
+        except Exception as exc:
+            print(f"\n✗ ERRO NÃO TRATADO: {type(exc).__name__}: {exc}")
+            return None
+        self.show_result(result)
+        return result
     def _persist_health(self,data):
         if self.db:self.db.save_snapshot(self.host,data,kind="health")
         findings=self.engine.evaluate(data);self.last_diagnoses=self.correlator.correlate(findings)
@@ -118,9 +165,41 @@ class ConsoleUIV5(ConsoleUIV3):
         for r in self.job_manager.list_records()[-30:]:print(f"{r.job_id} | {r.host} | {r.state.value} | {r.operation_class.value} | {r.elapsed_seconds:.1f}s | {r.label}")
         self.pause()
     def menu_update(self):
-        self.clear();print(f"Versão atual: {__version__}")
-        try:i=self.jobs.run("Consultando releases",self.updater.check_latest,timeout=30);print(f"Última versão: {i.latest} | Atualização disponível: {'SIM' if i.update_available else 'NÃO'}")
-        except Exception as exc:print(f"Não foi possível consultar atualização: {exc}")
+        self.clear()
+        print(f"Versão atual: {__version__}")
+        try:
+            info=self.jobs.run("Consultando releases",self.updater.check_latest,timeout=30)
+        except Exception as exc:
+            print(f"Não foi possível consultar atualização: {exc}")
+            self.pause()
+            return
+
+        print(f"Última versão: {info.latest} | Atualização disponível: {'SIM' if info.update_available else 'NÃO'}")
+        if not info.update_available or not info.assets:
+            self.pause()
+            return
+
+        print("\nArtefatos disponíveis:")
+        for index,asset in enumerate(info.assets,1):
+            print(f"{index} - {asset.get('name','sem nome')}")
+
+        choice=input("Número para baixar (0 cancela): ").strip()
+        if choice=="0" or not choice.isdigit() or not (1<=int(choice)<=len(info.assets)):
+            return
+
+        asset=info.assets[int(choice)-1]
+        if not self.confirm(f"Baixar {asset.get('name','artefato')} para a pasta updates?"):
+            return
+        try:
+            path=self.jobs.run(
+                "Baixando atualização",
+                lambda:self.updater.download_asset(asset,self.update_dir),
+                timeout=900,
+            )
+            print(f"✓ Download concluído: {path}")
+            print("A instalação permanece manual/controlada; a Central não se substitui silenciosamente.")
+        except Exception as exc:
+            print(f"✗ Falha no download: {exc}")
         self.pause()
     def menu_glpi_api(self):
         self.clear();cfg=self.settings.get("glpi_api",{})
@@ -134,4 +213,108 @@ class ConsoleUIV5(ConsoleUIV3):
         finally:
             try:client.kill_session()
             except Exception:pass
+        self.pause()
+
+    def _health_payload(self,host:str):
+        result=self.health.snapshot(host)
+        if result.success and isinstance(result.data,dict):
+            return result.data
+        return {"error":result.stderr or "snapshot indisponível"}
+
+    def menu_remediations(self):
+        if not self.require_host():
+            return
+        self.clear()
+        print("REMEDIAÇÕES GUIADAS")
+        print("1 - Limpeza segura de temporários")
+        print("2 - Reiniciar Spooler")
+        print("3 - Resetar componentes do Windows Update")
+        print("4 - GPUpdate /force")
+        print("0 - Voltar")
+        op=input("Opção: ").strip()
+
+        specs={
+            "1":(
+                RemediationSpec("safe_cleanup","Limpeza segura de temporários","médio",True,False,False,"Não há rollback automático para temporários removidos."),
+                self.disk.cleanup_safe,
+                OperationClass.HEAVY_WRITE,
+            ),
+            "2":(
+                RemediationSpec("restart_spooler","Reiniciar Spooler","baixo",True,False,False),
+                self.printers.restart_spooler,
+                OperationClass.LIGHT_WRITE,
+            ),
+            "3":(
+                RemediationSpec("reset_windows_update","Resetar componentes do Windows Update","alto",True,False,False,"SoftwareDistribution/catroot2 são renomeados com timestamp."),
+                self.updates.reset_components,
+                OperationClass.HEAVY_WRITE,
+            ),
+            "4":(
+                RemediationSpec("gpupdate_force","GPUpdate /force","baixo",True,False,False),
+                self.system.gpupdate,
+                OperationClass.LIGHT_WRITE,
+            ),
+        }
+        item=specs.get(op)
+        if not item:
+            return
+        spec,action,operation_class=item
+        print(f"\nAção: {spec.title}")
+        print(f"Impacto: {spec.impact.upper()} | Reboot esperado: {'SIM' if spec.requires_reboot else 'NÃO'}")
+        if spec.rollback:
+            print(f"Rollback/observação: {spec.rollback}")
+        if spec.requires_confirmation and not self.confirm(f"Executar {spec.title} em {self.host}?"):
+            return
+
+        try:
+            remediation=self.job_manager.run_sync(
+                self.host,
+                f"Remediação: {spec.title}",
+                lambda:self.remediation_engine.execute(
+                    self.host,
+                    spec,
+                    action,
+                    snapshotter=self._health_payload,
+                ),
+                operation_class=operation_class,
+                timeout=self.long_timeout,
+            )
+        except Exception as exc:
+            print(f"✗ Remediação falhou: {type(exc).__name__}: {exc}")
+            self.pause()
+            return
+
+        result=remediation.command_result
+        self.show_result(result)
+        changes=diff_values(remediation.before,remediation.after) if remediation.after is not None else []
+        print("\nANTES / DEPOIS")
+        if changes:
+            for change in changes[:50]:
+                print(f"- {change['path']}: {change['before']} -> {change['after']}")
+        else:
+            print("Nenhuma diferença do snapshot de saúde foi detectada.")
+
+        if self.db:
+            self.db.save_remediation(
+                self.host,
+                spec.key,
+                result.success,
+                asdict(remediation),
+            )
+            if isinstance(remediation.after,dict):
+                self.db.save_snapshot(self.host,remediation.after,kind=f"after:{spec.key}")
+        self.pause()
+
+    def menu_baseline(self):
+        self.clear()
+        profiles=self.baselines.available()
+        print(f"Perfil ativo: {self.active_baseline_profile}")
+        for index,profile in enumerate(profiles,1):
+            print(f"{index} - {profile}")
+        print("0 - Voltar")
+        choice=input("Perfil: ").strip()
+        if choice=="0" or not choice.isdigit() or not (1<=int(choice)<=len(profiles)):
+            return
+        self.active_baseline_profile=profiles[int(choice)-1]
+        print(f"✓ Baseline ativo nesta sessão: {self.active_baseline_profile}")
         self.pause()
