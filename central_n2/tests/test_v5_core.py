@@ -11,6 +11,7 @@ from core.connectivity import ConnectivityDiagnostics
 from core.host_identity import HostIdentity
 from core.jobs import JobManager, JobState, OperationClass
 from core.result import CommandResult
+from core.retry import RetryPolicy
 from core.transport.manager import TransportManager
 from storage.database import CentralDatabase
 
@@ -159,3 +160,41 @@ def test_timeout_state_is_not_overwritten_by_late_worker():
         assert record.state == JobState.TIMEOUT
     finally:
         manager.shutdown()
+
+
+def test_retry_policy_retries_only_transient_transport_failure():
+    policy = RetryPolicy(max_attempts=3, base_delay_seconds=0)
+    calls = []
+
+    def action():
+        calls.append(1)
+        if len(calls) == 1:
+            return CommandResult.failure(
+                "PC01",
+                "wsman",
+                "CannotConnect WSMan timeout",
+                return_code=124,
+            )
+        return CommandResult(True, "wsman", "PC01", stdout="OK")
+
+    result = policy.run(action)
+    assert result.success is True
+    assert len(calls) == 2
+    assert result.metadata["attempts"] == 2
+
+
+def test_retry_policy_does_not_retry_access_denied():
+    policy = RetryPolicy(max_attempts=3, base_delay_seconds=0)
+    calls = []
+
+    def action():
+        calls.append(1)
+        return CommandResult.failure(
+            "PC01",
+            "wsman",
+            "Acesso negado",
+        )
+
+    result = policy.run(action)
+    assert result.success is False
+    assert len(calls) == 1
