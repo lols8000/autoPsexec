@@ -5,12 +5,14 @@ from typing import Iterable,Callable
 from .host_identity import HostIdentity
 from .logger import AuditLogger
 from .result import CommandResult
+from .retry import RetryPolicy
 from .transport import LocalTransport,PsExecTransport,TransportManager,WinRMTransport
 class RemoteExecutor:
-    def __init__(self,*,psexec_path=None,timeout=60,logger=None,transport_cache_ttl_seconds=120.0):
+    def __init__(self,*,psexec_path=None,timeout=60,logger=None,transport_cache_ttl_seconds=120.0,retry_attempts=2,retry_base_delay_seconds=0.5):
         self.timeout=timeout;self.logger=logger;configured=Path(psexec_path) if psexec_path else None;self.psexec_path=str(configured) if configured and configured.exists() else self._discover_psexec()
+        self.retry_policy=RetryPolicy(max_attempts=int(retry_attempts),base_delay_seconds=float(retry_base_delay_seconds))
         self.local_transport=LocalTransport(self._run_local,self._powershell_utf8_prefix);self.winrm_transport=WinRMTransport(self._run_local,self._powershell_utf8_prefix);self.psexec_transport=PsExecTransport(self._run_local,self._powershell_utf8_prefix,self.psexec_path)
-        self.transport_manager=TransportManager(self.local_transport,self.winrm_transport,self.psexec_transport,cache_ttl_seconds=transport_cache_ttl_seconds)
+        self.transport_manager=TransportManager(self.local_transport,self.winrm_transport,self.psexec_transport,cache_ttl_seconds=transport_cache_ttl_seconds,retry_policy=self.retry_policy)
     @staticmethod
     def _discover_psexec():
         for c in (shutil.which("PsExec.exe"),shutil.which("psexec.exe"),r"C:\Windows\System32\PsExec.exe",r"C:\Sysinternals\PsExec.exe"):
@@ -45,7 +47,7 @@ class RemoteExecutor:
         except OSError:return None
     @staticmethod
     def is_local(host):return HostIdentity.is_local(host)
-    def select_transport(self,host,*,refresh=False):return self.transport_manager.select(host,refresh=refresh).name
+    def select_transport(self,host,*,refresh=False,winrm_result=None):return self.transport_manager.select(host,refresh=refresh,winrm_result=winrm_result).name
     def invalidate_transport(self,host):self.transport_manager.invalidate(host)
     def ping(self,host):
         if self.is_local(host):return CommandResult(True,"local",host,stdout="OK",transport="local")
@@ -53,7 +55,7 @@ class RemoteExecutor:
     def test_admin_share(self,host):
         if self.is_local(host):return CommandResult(True,"local",host,stdout="OK",transport="local")
         return self._run_local(["cmd.exe","/d","/c",f"dir \\\\{host}\\admin$ >nul 2>&1"],host=host,action="admin_share")
-    def test_winrm(self,host):return self.winrm_transport.test(host)
+    def test_winrm(self,host):return self.retry_policy.run(lambda:self.winrm_transport.test(host))
     @staticmethod
     def _is_transport_failure(r):
         text=(r.stderr or "").lower();return not r.success and any(x in text for x in ("psremotingtransportexception","cannotconnect","pssessionstatebroken","ws-management","the client cannot connect","o cliente não conseguiu se conectar"))
