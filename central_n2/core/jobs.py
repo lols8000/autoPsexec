@@ -45,6 +45,7 @@ class JobRecord:
     host: str
     label: str
     operation_class: OperationClass
+    correlation_id: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     state: JobState = JobState.QUEUED
     elapsed_seconds: float = 0.0
@@ -115,12 +116,14 @@ class JobManager:
         func: Callable[[], T],
         *,
         operation_class: OperationClass = OperationClass.READ_ONLY,
+        correlation_id: str | None = None,
     ) -> tuple[JobRecord, Future[T]]:
         record = JobRecord(
             job_id=uuid.uuid4().hex[:12],
             host=host,
             label=label,
             operation_class=operation_class,
+            correlation_id=correlation_id,
         )
         with self._guard:
             self._records[record.job_id] = record
@@ -156,12 +159,14 @@ class JobManager:
         operation_class: OperationClass = OperationClass.READ_ONLY,
         timeout: float | None = None,
         on_tick: Callable[[JobStatus], None] | None = None,
+        correlation_id: str | None = None,
     ) -> T:
         record, future = self.submit(
             host,
             label,
             func,
             operation_class=operation_class,
+            correlation_id=correlation_id,
         )
         started = time.monotonic()
         spinner = itertools.cycle("|/-\\")
