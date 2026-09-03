@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import uuid
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -28,7 +29,7 @@ class ConsoleUIV5(ConsoleUIV3):
         self.job_manager.set_observer(self.db.save_job if self.db else None)
         self.active_baseline_profile=str(self.settings.get("compliance",{}).get("profile","DEFAULT")).upper()
         self.engine=DiagnosticEngine();self.correlator=CorrelationEngine();self.playbook_runner=PlaybookRunner();self.playbooks=builtin_playbooks();self.remediation_engine=RemediationEngine();self.report_builder=SupportReportBuilder();self.report_exporter=ReportExporter(settings_path.parent.parent/"reports"/"support")
-        cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.update_dir=settings_path.parent.parent/"updates";self.current_session=None;self.last_diagnoses=[];self.last_playbook=None;self.last_remediation=None;self.last_report_path=None
+        cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.update_dir=settings_path.parent.parent/"updates";self.current_session=None;self.correlation_id=uuid.uuid4().hex[:16];self.last_diagnoses=[];self.last_playbook=None;self.last_remediation=None;self.last_report_path=None
     def run(self):
         try:
             while True:
@@ -42,7 +43,8 @@ class ConsoleUIV5(ConsoleUIV3):
     def select_host(self):
         self.clear();host=input("Hostname ou IP da estação: ").strip()
         if not host:return
-        try:s=self.jobs.run("Abrindo sessão lógica",lambda:self.sessions.open(host,refresh=True),timeout=180)
+        self.correlation_id=uuid.uuid4().hex[:16]
+        try:s=self.jobs.run("Abrindo sessão lógica",self._trace(lambda:self.sessions.open(host,refresh=True),action="preflight"),timeout=180)
         except Exception as exc:print(f"\n✗ Falha no preflight: {exc}");self.pause();return
         self.host=host;self.current_session=s;print(f"\n✓ Transporte selecionado: {s.transport}");print(f"Local: {'SIM' if s.connectivity.get('is_local') else 'NÃO'} | DNS: {s.connectivity.get('dns')} | WinRM: {s.connectivity.get('winrm')} | ADMIN$: {s.connectivity.get('admin_share')}");print(f"Diagnóstico: {s.connectivity.get('diagnosis')}")
         r=self.execute("Snapshot inicial de saúde",lambda:self.health.snapshot(host),timeout=120)
@@ -53,6 +55,15 @@ class ConsoleUIV5(ConsoleUIV3):
         effective=dict(cfg)
         effective["profile"]=self.active_baseline_profile
         return deep_merge(self.baselines.load(self.active_baseline_profile),effective)
+
+    def _trace(self,func:Callable,**context):
+        def wrapped():
+            logger=getattr(self.executor,"logger",None)
+            if not logger:
+                return func()
+            with logger.bind(correlation_id=self.correlation_id,**context):
+                return func()
+        return wrapped
 
     @staticmethod
     def _classify_operation(label:str)->OperationClass:
@@ -80,9 +91,10 @@ class ConsoleUIV5(ConsoleUIV3):
             result=self.job_manager.run_sync(
                 target,
                 label,
-                func,
+                self._trace(func,action=label),
                 operation_class=op_class,
                 timeout=timeout or self.long_timeout,
+                correlation_id=self.correlation_id,
             )
         except TimeoutError as exc:
             print(f"\n✗ TIMEOUT: {exc}")
@@ -112,7 +124,7 @@ class ConsoleUIV5(ConsoleUIV3):
             if not self.confirm(f"Executar DISM RestoreHealth em {self.host}?"):return
             def progress(ev):
                 if ev.percent is not None:print(f"\rDISM RestoreHealth [{ev.percent:6.2f}%] {ev.message[:60]:60}",end="",flush=True)
-            try:r=self.job_manager.run_sync(self.host,"DISM RestoreHealth",lambda:self.repair.dism_restorehealth_progress(self.host,progress),operation_class=OperationClass.HEAVY_WRITE,timeout=3600,on_tick=lambda _:None);print();self.show_result(r)
+            try:r=self.job_manager.run_sync(self.host,"DISM RestoreHealth",self._trace(lambda:self.repair.dism_restorehealth_progress(self.host,progress),action="DISM RestoreHealth"),operation_class=OperationClass.HEAVY_WRITE,timeout=3600,on_tick=lambda _:None,correlation_id=self.correlation_id);print();self.show_result(r)
             except Exception as exc:print(f"\n✗ {exc}")
             self.pause();return
         actions={"1":("SFC /scannow",self.repair.sfc_scan),"2":("DISM CheckHealth",self.repair.dism_checkhealth),"3":("DISM ScanHealth",self.repair.dism_scanhealth),"5":("Analisar Component Store",self.repair.component_store),"6":("Limpar Component Store",self.repair.component_cleanup),"7":("CHKDSK /scan",self.repair.chkdsk_scan),"8":("Verificar WMI",self.repair.repository_consistency)};item=actions.get(op)
@@ -201,7 +213,7 @@ class ConsoleUIV5(ConsoleUIV3):
         op=input("Opção (0 volta): ").strip()
         if op=="0" or not op.isdigit() or not(1<=int(op)<=len(keys)):return
         spec=self.playbooks[keys[int(op)-1]]
-        try:execution=self.job_manager.run_sync(self.host,f"Playbook {spec.title}",lambda:self.playbook_runner.run(spec,self.host,self._collectors(),on_step=lambda i,t,s:print(f"[{i}/{t}] {s.label}...")),operation_class=OperationClass.READ_ONLY,timeout=self.long_timeout,on_tick=lambda _:None)
+        try:execution=self.job_manager.run_sync(self.host,f"Playbook {spec.title}",self._trace(lambda:self.playbook_runner.run(spec,self.host,self._collectors(),on_step=lambda i,t,s:print(f"[{i}/{t}] {s.label}...")),action=f"Playbook {spec.title}"),operation_class=OperationClass.READ_ONLY,timeout=self.long_timeout,on_tick=lambda _:None,correlation_id=self.correlation_id)
         except Exception as exc:print(f"✗ {exc}");self.pause();return
         self.last_playbook=execution;merged={}
         for st in execution.steps:
@@ -227,7 +239,7 @@ class ConsoleUIV5(ConsoleUIV3):
         if self.last_remediation:
             actions.append(f"Remediação: {self.last_remediation.spec.title} — {'sucesso' if self.last_remediation.command_result.success else 'falha'}")
         validation=self.last_remediation.after if self.last_remediation and self.last_remediation.after is not None else self.health_snapshot
-        report=self.report_builder.build(host=self.host,user=(self.health_snapshot or {}).get("User"),problem=problem,diagnosis=diag,actions=actions,validation=validation,result="Diagnóstico/atendimento registrado");stamp=datetime.now().strftime("%Y%m%d_%H%M%S");path=self.report_exporter.export(report,fmt="markdown",stem=f"{self.host}_{stamp}");self.report_exporter.export(report,fmt="json",stem=f"{self.host}_{stamp}");self.last_report_path=path
+        report=self.report_builder.build(host=self.host,user=(self.health_snapshot or {}).get("User"),problem=problem,diagnosis=diag,actions=actions,validation=validation,result="Diagnóstico/atendimento registrado");report["correlation_id"]=self.correlation_id;stamp=datetime.now().strftime("%Y%m%d_%H%M%S");path=self.report_exporter.export(report,fmt="markdown",stem=f"{self.host}_{stamp}");self.report_exporter.export(report,fmt="json",stem=f"{self.host}_{stamp}");self.last_report_path=path
         if self.db:self.db.save_report(self.host,"markdown",path.read_text(encoding="utf-8"),path=str(path))
         print(f"✓ Relatório: {path}");self.pause()
     def menu_jobs(self):
@@ -288,8 +300,19 @@ class ConsoleUIV5(ConsoleUIV3):
         if not ticket.isdigit():return
         if not self.last_report_path or not Path(self.last_report_path).exists():print("Gere um relatório antes de enviar ao GLPI.");self.pause();return
         client=GLPIClient(cfg.get("base_url",""),cfg.get("app_token",""),cfg.get("user_token",""))
-        try:client.add_ticket_followup(int(ticket),Path(self.last_report_path).read_text(encoding="utf-8"));print("✓ Acompanhamento enviado ao GLPI.")
-        except GLPIError as exc:print(f"✗ GLPI: {exc}")
+        try:
+            client.add_ticket_followup(int(ticket),Path(self.last_report_path).read_text(encoding="utf-8"))
+            logger=getattr(self.executor,"logger",None)
+            if logger:
+                with logger.bind(correlation_id=self.correlation_id):
+                    logger.log_event("glpi_ticket_followup",self.host,"success",ticket_id=int(ticket))
+            print("✓ Acompanhamento enviado ao GLPI.")
+        except GLPIError as exc:
+            logger=getattr(self.executor,"logger",None)
+            if logger:
+                with logger.bind(correlation_id=self.correlation_id):
+                    logger.log_event("glpi_ticket_followup",self.host,"failure",ticket_id=int(ticket),error=str(exc))
+            print(f"✗ GLPI: {exc}")
         finally:
             try:client.kill_session()
             except Exception:pass
@@ -350,14 +373,18 @@ class ConsoleUIV5(ConsoleUIV3):
             remediation=self.job_manager.run_sync(
                 self.host,
                 f"Remediação: {spec.title}",
-                lambda:self.remediation_engine.execute(
-                    self.host,
-                    spec,
-                    action,
-                    snapshotter=self._health_payload,
+                self._trace(
+                    lambda:self.remediation_engine.execute(
+                        self.host,
+                        spec,
+                        action,
+                        snapshotter=self._health_payload,
+                    ),
+                    action=f"Remediação {spec.key}",
                 ),
                 operation_class=operation_class,
                 timeout=self.long_timeout,
+                correlation_id=self.correlation_id,
             )
         except Exception as exc:
             print(f"✗ Remediação falhou: {type(exc).__name__}: {exc}")
