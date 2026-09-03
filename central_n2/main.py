@@ -8,7 +8,7 @@ from pathlib import Path
 
 from core.executor import RemoteExecutor
 from core.logger import AuditLogger
-from ui.console import ConsoleUI
+from ui.console_v3 import ConsoleUIV3
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -27,14 +27,7 @@ def is_admin() -> bool:
 
 def relaunch_as_admin() -> None:
     params = " ".join(f'"{arg}"' if " " in arg else arg for arg in sys.argv)
-    rc = ctypes.windll.shell32.ShellExecuteW(
-        None,
-        "runas",
-        sys.executable,
-        params,
-        str(BASE_DIR),
-        1,
-    )
+    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, str(BASE_DIR), 1)
     if rc <= 32:
         raise RuntimeError(f"Não foi possível elevar privilégios. ShellExecute retornou {rc}.")
 
@@ -43,11 +36,9 @@ def main() -> int:
     if os.name != "nt":
         print("Esta ferramenta foi projetada para administração de estações Windows.")
         return 2
-
     if not SETTINGS_PATH.exists():
         print(f"Arquivo de configuração não encontrado: {SETTINGS_PATH}")
         return 2
-
     if not is_admin():
         try:
             relaunch_as_admin()
@@ -63,7 +54,7 @@ def main() -> int:
         timeout=int(settings.get("timeout_seconds", 60)),
         logger=logger,
     )
-    ConsoleUI(executor, SETTINGS_PATH).run()
+    ConsoleUIV3(executor, SETTINGS_PATH).run()
     return 0
 
 
