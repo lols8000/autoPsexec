@@ -20,6 +20,9 @@ $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
 '''
         return self.executor.execute_powershell_json(host, script)
 
+    def space(self, host: str) -> CommandResult:
+        return self.usage(host)
+
     def top_user_profiles(self, host: str) -> CommandResult:
         script = r'''
 Get-ChildItem 'C:\Users' -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
@@ -28,6 +31,9 @@ Get-ChildItem 'C:\Users' -Directory -Force -ErrorAction SilentlyContinue | ForEa
 } | Sort-Object SizeGB -Descending
 '''
         return self.executor.execute_powershell_json(host, script, timeout=240)
+
+    def profile_sizes(self, host: str) -> CommandResult:
+        return self.top_user_profiles(host)
 
     def cleanup_estimate(self, host: str) -> CommandResult:
         script = r'''
