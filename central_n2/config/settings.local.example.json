@@ -1,0 +1,5 @@
+{
+  "psexec_path": "C:\\Sysinternals\\PsExec.exe",
+  "glpi": {"installer_source": "\\\\servidor\\share\\glpiagentinstall.vbs"},
+  "glpi_api": {"enabled": false, "base_url": "https://glpi.exemplo/apirest.php", "app_token": "PREENCHA_LOCALMENTE", "user_token": "PREENCHA_LOCALMENTE"}
+}
