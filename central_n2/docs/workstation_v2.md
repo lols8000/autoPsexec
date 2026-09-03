@@ -1,5 +1,8 @@
 # Central de Manutenção N2 — Workstation v2
 
+> [!WARNING]
+> **Documento histórico.** Esta página descreve a geração v2 e não é a referência operacional atual. Para a v3, comece por [`README.md`](README.md), [`operations.md`](operations.md) e [`architecture.md`](architecture.md).
+
 ## Escopo
 
 A v2 é dedicada exclusivamente à administração, diagnóstico, manutenção e conformidade de estações de trabalho Windows. Operações de switch, NAC, OUI, MAC ACL e configuração Intelbras foram removidas do projeto.
