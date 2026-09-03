@@ -37,3 +37,10 @@ jobs:
 
       - name: Build portable smoke
         run: pyinstaller CentralN2.spec --clean --noconfirm
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer smoke
+        shell: pwsh
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\CentralN2.iss'
