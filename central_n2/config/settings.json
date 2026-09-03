@@ -11,5 +11,13 @@
     "firefox": {"name": "Mozilla Firefox", "winget_id": "Mozilla.Firefox"},
     "7zip": {"name": "7-Zip", "winget_id": "7zip.7zip"},
     "vnc": {"name": "UltraVNC", "winget_id": "uvncbvba.UltraVnc"}
+  },
+  "compliance": {
+    "min_disk_free_percent": 15,
+    "max_uptime_days": 30,
+    "defender_required": true,
+    "firewall_required": true,
+    "glpi_required": true,
+    "pending_reboot_not_allowed": true
   }
 }
