@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import ctypes
 import json
 import locale
@@ -12,12 +11,14 @@ import time
 from pathlib import Path
 from typing import Iterable
 
+from .host_identity import HostIdentity
 from .logger import AuditLogger
 from .result import CommandResult
+from .transport import LocalTransport, PsExecTransport, TransportManager, WinRMTransport
 
 
 class RemoteExecutor:
-    """Executa comandos remotos priorizando PowerShell Remoting e usando PsExec como fallback."""
+    """Facade de execução com seleção Local -> WinRM -> PsExec."""
 
     def __init__(
         self,
@@ -25,11 +26,21 @@ class RemoteExecutor:
         psexec_path: str | None = None,
         timeout: int = 60,
         logger: AuditLogger | None = None,
+        transport_cache_ttl_seconds: float = 120.0,
     ) -> None:
         self.timeout = timeout
         self.logger = logger
         configured = Path(psexec_path) if psexec_path else None
         self.psexec_path = str(configured) if configured and configured.exists() else self._discover_psexec()
+        self.local_transport = LocalTransport(self._run_local, self._powershell_utf8_prefix)
+        self.winrm_transport = WinRMTransport(self._run_local, self._powershell_utf8_prefix)
+        self.psexec_transport = PsExecTransport(self._run_local, self._powershell_utf8_prefix, self.psexec_path)
+        self.transport_manager = TransportManager(
+            self.local_transport,
+            self.winrm_transport,
+            self.psexec_transport,
+            cache_ttl_seconds=transport_cache_ttl_seconds,
+        )
 
     @staticmethod
     def _discover_psexec() -> str | None:
@@ -46,7 +57,6 @@ class RemoteExecutor:
 
     @staticmethod
     def _console_encoding() -> str | None:
-        """Retorna a code page de saída do console Windows, quando disponível."""
         if os.name != "nt":
             return None
         try:
@@ -57,16 +67,8 @@ class RemoteExecutor:
 
     @classmethod
     def _decode_output(cls, data: bytes | None, *, preferred: str | None = None) -> str:
-        """Decodifica stdout/stderr sem destruir caracteres acentuados.
-
-        PowerShell executado pela Central é explicitamente configurado para UTF-8.
-        Para comandos nativos do Windows, a code page do console é priorizada.
-        O fallback final usa latin-1 apenas para preservar os bytes em vez de
-        substituí-los por U+FFFD (�).
-        """
         if not data:
             return ""
-
         if data.startswith((b"\xff\xfe", b"\xfe\xff")):
             try:
                 return data.decode("utf-16")
@@ -79,30 +81,18 @@ class RemoteExecutor:
                 pass
 
         candidates: list[str] = []
-        for encoding in (
-            preferred,
-            "utf-8",
-            cls._console_encoding(),
-            locale.getpreferredencoding(False),
-            "cp850",
-            "cp1252",
-        ):
+        for encoding in (preferred, "utf-8", cls._console_encoding(), locale.getpreferredencoding(False), "cp850", "cp1252"):
             if encoding and encoding.lower() not in {item.lower() for item in candidates}:
                 candidates.append(encoding)
-
         for encoding in candidates:
             try:
                 return data.decode(encoding, errors="strict")
             except (LookupError, UnicodeDecodeError):
                 continue
-
-        # Último recurso: mapeamento 1:1 para não perder bytes com replacement chars.
         return data.decode("latin-1", errors="strict")
 
     @staticmethod
     def _powershell_utf8_prefix() -> str:
-        # Windows PowerShell 5.1 não garante UTF-8 quando stdout/stderr é redirecionado.
-        # Definir Console.OutputEncoding evita mojibake na captura feita pelo Python.
         return (
             "$__centralN2Utf8 = New-Object System.Text.UTF8Encoding($false); "
             "[Console]::OutputEncoding = $__centralN2Utf8; "
@@ -116,10 +106,24 @@ class RemoteExecutor:
         except OSError:
             return None
 
+    @staticmethod
+    def is_local(host: str) -> bool:
+        return HostIdentity.is_local(host)
+
+    def select_transport(self, host: str, *, refresh: bool = False) -> str:
+        return self.transport_manager.select(host, refresh=refresh).name
+
+    def invalidate_transport(self, host: str) -> None:
+        self.transport_manager.invalidate(host)
+
     def ping(self, host: str) -> CommandResult:
+        if self.is_local(host):
+            return CommandResult(True, "local", host, stdout="OK", transport="local")
         return self._run_local(["ping", "-n", "1", "-w", "1200", host], host=host, action="ping")
 
     def test_admin_share(self, host: str) -> CommandResult:
+        if self.is_local(host):
+            return CommandResult(True, "local", host, stdout="OK", transport="local")
         return self._run_local(
             ["cmd.exe", "/d", "/c", f"dir \\\\{host}\\admin$ >nul 2>&1"],
             host=host,
@@ -127,15 +131,34 @@ class RemoteExecutor:
         )
 
     def test_winrm(self, host: str) -> CommandResult:
-        safe_host = host.replace("'", "''")
-        script = f"$ErrorActionPreference='Stop'; Test-WSMan -ComputerName '{safe_host}' | Out-Null; 'OK'"
-        return self._run_powershell_local(script, host=host, action="test_winrm", timeout=15)
+        return self.winrm_transport.test(host)
+
+    @staticmethod
+    def _is_transport_failure(result: CommandResult) -> bool:
+        text = (result.stderr or "").lower()
+        markers = (
+            "psremotingtransportexception",
+            "cannotconnect",
+            "pssessionstatebroken",
+            "ws-management",
+            "winrm",
+            "the client cannot connect",
+            "o cliente não conseguiu se conectar",
+        )
+        return not result.success and any(marker in text for marker in markers)
 
     def execute_powershell(self, host: str, script: str, *, timeout: int | None = None) -> CommandResult:
-        safe_host = host.replace("'", "''")
-        wrapped = f"$ErrorActionPreference='Stop'; Invoke-Command -ComputerName '{safe_host}' -ScriptBlock {{ {script} }}"
-        result = self._run_powershell_local(wrapped, host=host, action="powershell_remote", timeout=timeout)
-        result.transport = "winrm"
+        transport = self.transport_manager.select(host)
+        result = transport.execute_powershell(host, script, timeout=timeout)
+        if (
+            transport.name == "winrm"
+            and self._is_transport_failure(result)
+            and self.psexec_transport.available()
+        ):
+            self.transport_manager.invalidate(host)
+            fallback = self.psexec_transport.execute_powershell(host, script, timeout=timeout)
+            fallback.metadata["fallback_from"] = "winrm"
+            return fallback
         return result
 
     def execute_powershell_json(self, host: str, script: str, *, timeout: int | None = None) -> CommandResult:
@@ -161,32 +184,24 @@ class RemoteExecutor:
         timeout: int | None = None,
         output_encoding: str | None = None,
     ) -> CommandResult:
-        if not self.psexec_path:
-            return CommandResult.failure(
-                host,
-                executable,
-                "PsExec não encontrado. Instale Sysinternals PsExec ou configure psexec_path.",
-                transport="psexec",
-            )
-        cmd = [self.psexec_path, "-accepteula", "-nobanner", f"\\\\{host}"]
-        if system:
-            cmd.append("-s")
-        cmd.extend([executable, *list(args)])
-        result = self._run_local(
-            cmd,
-            host=host,
-            action="psexec",
+        return self.psexec_transport.execute_raw(
+            host,
+            executable,
+            list(args),
+            system=system,
             timeout=timeout,
             output_encoding=output_encoding,
         )
-        result.transport = "psexec"
-        return result
 
     def execute_cmd(self, host: str, command: str, *, timeout: int | None = None) -> CommandResult:
-        if self.test_winrm(host).success:
-            escaped = command.replace("'", "''")
-            return self.execute_powershell(host, f"cmd.exe /d /c '{escaped}'", timeout=timeout)
-        return self.execute_psexec(host, "cmd.exe", ["/d", "/c", command], timeout=timeout)
+        transport = self.transport_manager.select(host)
+        result = transport.execute_cmd(host, command, timeout=timeout)
+        if transport.name == "winrm" and self._is_transport_failure(result) and self.psexec_transport.available():
+            self.transport_manager.invalidate(host)
+            fallback = self.psexec_transport.execute_cmd(host, command, timeout=timeout)
+            fallback.metadata["fallback_from"] = "winrm"
+            return fallback
+        return result
 
     def execute_remote_powershell_with_fallback(
         self,
@@ -195,18 +210,7 @@ class RemoteExecutor:
         *,
         timeout: int | None = None,
     ) -> CommandResult:
-        if self.test_winrm(host).success:
-            return self.execute_powershell(host, script, timeout=timeout)
-
-        remote_script = self._powershell_utf8_prefix() + script
-        encoded = base64.b64encode(remote_script.encode("utf-16le")).decode("ascii")
-        return self.execute_psexec(
-            host,
-            "powershell.exe",
-            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
-            timeout=timeout,
-            output_encoding="utf-8",
-        )
+        return self.execute_powershell(host, script, timeout=timeout)
 
     def _run_powershell_local(
         self,
@@ -216,9 +220,9 @@ class RemoteExecutor:
         action: str,
         timeout: int | None = None,
     ) -> CommandResult:
-        utf8_script = self._powershell_utf8_prefix() + script
+        payload = self._powershell_utf8_prefix() + script
         return self._run_local(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", utf8_script],
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", payload],
             host=host,
             action=action,
             timeout=timeout,
