@@ -15,6 +15,9 @@ Get-Printer -ErrorAction SilentlyContinue |
 '''
         return self.executor.execute_powershell_json(host, script)
 
+    def list_printers(self, host: str) -> CommandResult:
+        return self.list(host)
+
     def queue(self, host: str, printer_name: str | None = None) -> CommandResult:
         if printer_name:
             safe = printer_name.replace("'", "''")
