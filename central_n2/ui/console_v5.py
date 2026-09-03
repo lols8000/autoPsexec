@@ -28,7 +28,7 @@ class ConsoleUIV5(ConsoleUIV3):
         self.job_manager.set_observer(self.db.save_job if self.db else None)
         self.active_baseline_profile=str(self.settings.get("compliance",{}).get("profile","DEFAULT")).upper()
         self.engine=DiagnosticEngine();self.correlator=CorrelationEngine();self.playbook_runner=PlaybookRunner();self.playbooks=builtin_playbooks();self.remediation_engine=RemediationEngine();self.report_builder=SupportReportBuilder();self.report_exporter=ReportExporter(settings_path.parent.parent/"reports"/"support")
-        cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.update_dir=settings_path.parent.parent/"updates";self.last_diagnoses=[];self.last_playbook=None;self.last_remediation=None;self.last_report_path=None
+        cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.update_dir=settings_path.parent.parent/"updates";self.current_session=None;self.last_diagnoses=[];self.last_playbook=None;self.last_remediation=None;self.last_report_path=None
     def run(self):
         try:
             while True:
@@ -44,7 +44,7 @@ class ConsoleUIV5(ConsoleUIV3):
         if not host:return
         try:s=self.jobs.run("Abrindo sessão lógica",lambda:self.sessions.open(host,refresh=True),timeout=180)
         except Exception as exc:print(f"\n✗ Falha no preflight: {exc}");self.pause();return
-        self.host=host;print(f"\n✓ Transporte selecionado: {s.transport}");print(f"Local: {'SIM' if s.connectivity.get('is_local') else 'NÃO'} | DNS: {s.connectivity.get('dns')} | WinRM: {s.connectivity.get('winrm')} | ADMIN$: {s.connectivity.get('admin_share')}");print(f"Diagnóstico: {s.connectivity.get('diagnosis')}")
+        self.host=host;self.current_session=s;print(f"\n✓ Transporte selecionado: {s.transport}");print(f"Local: {'SIM' if s.connectivity.get('is_local') else 'NÃO'} | DNS: {s.connectivity.get('dns')} | WinRM: {s.connectivity.get('winrm')} | ADMIN$: {s.connectivity.get('admin_share')}");print(f"Diagnóstico: {s.connectivity.get('diagnosis')}")
         r=self.execute("Snapshot inicial de saúde",lambda:self.health.snapshot(host),timeout=120)
         if r and r.success and isinstance(r.data,dict):self.health_snapshot=r.data;self.show_health(r.data);self._persist_health(r.data)
         self.pause()
@@ -119,6 +119,73 @@ class ConsoleUIV5(ConsoleUIV3):
         if not item:return
         if op=="6" and not self.confirm(f"Executar {item[0]}?"):return
         self.execute(item[0],lambda:item[1](self.host),timeout=3600);self.pause()
+
+    def _capability(self,key:str,default=None):
+        if not self.current_session:
+            return default
+        return self.current_session.capabilities.get(key,default)
+
+    def menu_storage(self):
+        if not self.require_host():
+            return
+        battery=self._capability("Battery")
+        battery_label="Bateria" if battery is not False else "Bateria [N/A nesta estação]"
+        self.clear()
+        print("DISCO / ARMAZENAMENTO / BATERIA")
+        print("1 - Espaço e volumes")
+        print("2 - Discos físicos / saúde")
+        print(f"3 - {battery_label}")
+        print("4 - Perfis por tamanho")
+        print("5 - Estimar limpeza")
+        print("0 - Voltar")
+        op=input("Opção: ").strip()
+        if op=="3" and battery is False:
+            print("Esta estação não expõe bateria ao Windows; a coleta foi evitada.")
+            self.pause()
+            return
+        actions={
+            "1":("Analisando volumes",self.disk.space),
+            "2":("Analisando discos físicos",self.storage.physical_disks),
+            "3":("Analisando bateria",self.storage.battery),
+            "4":("Medindo perfis",self.disk.profile_sizes),
+            "5":("Estimando limpeza",self.disk.cleanup_estimate),
+        }
+        item=actions.get(op)
+        if not item:
+            return
+        self.execute(item[0],lambda:item[1](self.host),timeout=600)
+        self.pause()
+
+    def menu_software_glpi(self):
+        if not self.require_host():
+            return
+        winget=self._capability("Winget")
+        winget_label="Winget" if winget is not False else "Winget [N/A]"
+        self.clear()
+        print("SOFTWARE / GLPI")
+        print("1 - Software instalado")
+        print(f"2 - {winget_label}")
+        print("3 - GLPI status")
+        print("4 - Forçar inventário GLPI")
+        print("0 - Voltar")
+        op=input("Opção: ").strip()
+        if op=="2" and winget is False:
+            print("Winget não foi detectado nesta estação.")
+            self.pause()
+            return
+        if op=="1":
+            fn=self.software.list_installed;label="Inventariando software"
+        elif op=="2":
+            fn=self.software.winget_available;label="Verificando Winget"
+        elif op=="3":
+            fn=self.glpi.status;label="Verificando GLPI"
+        elif op=="4":
+            fn=self.glpi.force_inventory;label="Forçando inventário GLPI"
+        else:
+            return
+        self.execute(label,lambda:fn(self.host),timeout=600)
+        self.pause()
+
     def menu_connectivity(self):
         if not self.require_host():return
         self.clear()
