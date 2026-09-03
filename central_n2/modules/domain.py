@@ -31,6 +31,9 @@ try { $time = (w32tm /query /status 2>$null | Out-String).Trim() } catch {}
     def gpresult(self, host: str) -> CommandResult:
         return self.executor.execute_cmd(host, "gpresult /r /scope computer", timeout=120)
 
+    def gpupdate(self, host: str) -> CommandResult:
+        return self.executor.execute_cmd(host, "gpupdate /force", timeout=300)
+
     def repair_secure_channel(self, host: str) -> CommandResult:
         script = "Test-ComputerSecureChannel -Repair -ErrorAction Stop"
         return self.executor.execute_remote_powershell_with_fallback(host, script, timeout=120)

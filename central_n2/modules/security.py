@@ -45,6 +45,9 @@ try { $smb1 = (Get-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -Err
 '''
         return self.executor.execute_powershell_json(host, script, timeout=120)
 
+    def posture(self, host: str) -> CommandResult:
+        return self.status(host)
+
     def threats(self, host: str) -> CommandResult:
         script = r'''
 try {
