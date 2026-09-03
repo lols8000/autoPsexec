@@ -32,7 +32,7 @@ def main():
         try:relaunch_as_admin()
         except Exception as exc:print(f"Falha ao solicitar elevação administrativa: {exc}");return 5
         return 0
-    settings=ConfigLoader(SETTINGS_PATH).settings;runtime=settings.get("runtime",{});logger=AuditLogger(LOG_DIR);executor=RemoteExecutor(psexec_path=settings.get("psexec_path") or None,timeout=int(settings.get("timeout_seconds",60)),logger=logger,transport_cache_ttl_seconds=float(runtime.get("transport_cache_ttl_seconds",120)))
+    settings=ConfigLoader(SETTINGS_PATH).settings;runtime=settings.get("runtime",{});logger=AuditLogger(LOG_DIR);executor=RemoteExecutor(psexec_path=settings.get("psexec_path") or None,timeout=int(settings.get("timeout_seconds",60)),logger=logger,transport_cache_ttl_seconds=float(runtime.get("transport_cache_ttl_seconds",120)),retry_attempts=int(runtime.get("retry_attempts",2)),retry_base_delay_seconds=float(runtime.get("retry_base_delay_seconds",0.5)))
     if args.gui:
         from ui.tk_app import run_gui;run_gui(executor,SETTINGS_PATH)
     else:
