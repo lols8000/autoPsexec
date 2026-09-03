@@ -1,74 +1,179 @@
-# Central Remota de Manutenção N2
+# Central de Manutenção N2 — Estações Windows
 
-Evolução do projeto histórico `autoPsexec` para uma central modular de administração remota de estações Windows e auditoria de acesso físico à rede. Os scripts antigos da raiz do repositório são preservados como referência e não são utilizados pela nova aplicação.
+Evolução do antigo `autoPsexec` para uma central modular de diagnóstico, manutenção, conformidade e administração remota de **estações de trabalho Windows**.
 
-## O que já está implementado
+A v2 remove do escopo operações de switch, NAC, OUI e MAC ACL. O projeto passa a ser exclusivamente orientado a endpoints Windows.
 
-### Endpoints Windows
+## O que está implementado
 
-- seleção persistente do computador alvo;
-- pré-flight automático com DNS, ping, `ADMIN$`, WinRM e inventário básico;
-- PowerShell Remoting/WinRM como transporte preferencial;
-- PsExec/Sysinternals como fallback;
-- execução sem `shell=True` no motor principal;
-- inventário por PowerShell/CIM, sem dependência do WMIC;
-- fabricante, modelo, serial, BIOS, Windows, CPU, RAM, disco e uptime;
-- eventos críticos e reinicialização pendente;
-- sessões de usuário, processos e serviços;
-- `gpupdate /force` e mensagens remotas;
-- rede: interfaces, MAC, IP, gateway, DNS, DHCP, Winsock, TCP/IP, Wi-Fi, ARP e conexões TCP;
-- catálogo Winget;
-- GLPI Agent;
-- reinício/desligamento com confirmação;
-- ações em lote;
-- auditoria JSONL.
+### Visão geral / Saúde
 
-### Network / NAC Intelbras
+- pré-flight com DNS, ping, `ADMIN$` e WinRM;
+- fabricante, modelo, serial, Windows e usuário;
+- CPU, RAM, disco e uptime;
+- reinicialização pendente;
+- serviços automáticos parados;
+- Defender, Firewall e GLPI Agent;
+- score de saúde com achados por severidade.
 
-- parser tolerante para formatos comuns de tabela MAC;
-- normalização de MAC e OUI;
-- classificação por fabricante homologado;
-- lista de exceções por MAC exato;
-- identificação de MAC localmente administrado/randomizado;
-- relatório por porta/VLAN;
-- auditoria por arquivo ou SSH;
-- perfis Intelbras por família;
-- geração de plano de MAC ACL por OUI para Série 3000;
-- recusa automática de política OUI em perfil cuja sintaxe não esteja validada;
-- exclusão explícita de uplinks/trunks/APs na geração;
-- geração de plano sem aplicação automática;
-- testes offline para parser, OUI e ACL.
+### Usuários e perfis
+
+- sessões abertas;
+- administradores locais;
+- perfis locais;
+- último uso;
+- tamanho aproximado do perfil;
+- remoção por SID com confirmação.
+
+### Rede da estação
+
+- interfaces;
+- IP, gateway e DNS;
+- DHCP;
+- flush DNS;
+- reset Winsock/TCP-IP;
+- Wi-Fi;
+- ARP;
+- conexões TCP;
+- teste de porta remoto.
+
+### Software
+
+- inventário de programas;
+- Winget;
+- catálogo homologado;
+- instalação, atualização e remoção controladas.
+
+### Processos e serviços
+
+- processos por consumo;
+- finalização controlada;
+- serviços;
+- iniciar, parar e reiniciar.
+
+### Windows Update
+
+- histórico de hotfixes;
+- atualizações pendentes;
+- disparo de busca;
+- reset controlado de BITS/Windows Update/Cryptographic Services.
+
+### Segurança
+
+- Microsoft Defender;
+- proteção em tempo real;
+- assinatura e varreduras;
+- ameaças recentes;
+- Firewall;
+- BitLocker;
+- TPM;
+- Secure Boot;
+- RDP;
+- SMBv1;
+- UAC.
+
+A Central não oferece ações para desativar Defender ou Firewall.
+
+### Domínio / GPO
+
+- domínio e participação no domínio;
+- secure channel;
+- DC via `nltest`;
+- hora via `w32tm`;
+- `gpresult`;
+- `gpupdate /force`;
+- reparo controlado do secure channel.
+
+### Impressoras
+
+- impressoras instaladas;
+- drivers e portas;
+- filas;
+- reinício do Spooler;
+- limpeza de filas com confirmação.
+
+### GLPI Agent
+
+- status;
+- instalação/reparo;
+- serviço;
+- inventário forçado;
+- log recente.
+
+### Disco / limpeza
+
+- uso do disco C:;
+- tamanho dos perfis;
+- estimativa de espaço temporário recuperável;
+- limpeza segura de TEMP e Lixeira.
+
+Downloads não são apagados automaticamente.
+
+### Eventos e diagnóstico
+
+- eventos críticos recentes;
+- pacote de diagnóstico local em JSON;
+- informações de SO, hardware, rede, serviços, eventos, impressoras e processos.
+
+### Compliance
+
+Baseline configurável em `config/settings.json`:
+
+```json
+"compliance": {
+  "min_disk_free_percent": 15,
+  "max_uptime_days": 30,
+  "defender_required": true,
+  "firewall_required": true,
+  "glpi_required": true,
+  "pending_reboot_not_allowed": true
+}
+```
+
+A Central calcula um score e mostra cada controle aprovado ou reprovado.
+
+### Ações em lote
+
+- ping;
+- GPUpdate;
+- flush DNS;
+- inventário GLPI;
+- snapshot de saúde.
 
 ## Estrutura
 
 ```text
 central_n2/
 ├── main.py
-├── network_nac_cli.py
-├── pyproject.toml
 ├── config/
-│   ├── settings.json
-│   ├── oui_allowlist.json
-│   └── oui_allowlist.example.json
+│   └── settings.json
 ├── core/
 │   ├── executor.py
 │   ├── logger.py
 │   └── result.py
 ├── modules/
 │   ├── batch.py
+│   ├── compliance.py
+│   ├── diagnostic_package.py
 │   ├── diagnostics.py
+│   ├── disk.py
+│   ├── domain.py
 │   ├── glpi.py
+│   ├── health.py
 │   ├── network.py
-│   ├── network_nac.py
+│   ├── printers.py
+│   ├── security.py
 │   ├── software.py
-│   └── system.py
+│   ├── system.py
+│   ├── updates.py
+│   └── users_profiles.py
 ├── ui/
 │   └── console.py
 ├── docs/
-│   └── network_nac_intelbras.md
+│   └── workstation_v2.md
 ├── tests/
 │   ├── test_core.py
-│   └── test_network_nac.py
+│   └── test_workstation_v2.py
 ├── logs/
 └── reports/
 ```
@@ -77,153 +182,20 @@ central_n2/
 
 - Windows 10/11 ou Windows Server na estação administrativa;
 - Python 3.10+;
-- privilégios administrativos para o módulo de endpoints;
-- conectividade e permissões administrativas nos computadores alvo;
-- WinRM/PowerShell Remoting para o caminho preferencial;
-- PsExec para fallback quando necessário;
-- cliente OpenSSH do Windows para auditoria direta de switches.
+- privilégios administrativos;
+- conectividade/permissões administrativas nas estações alvo;
+- WinRM/PowerShell Remoting preferencial;
+- PsExec como fallback.
 
-A aplicação usa somente a biblioteca padrão do Python em produção. `pytest` é dependência opcional de desenvolvimento.
+A aplicação utiliza apenas biblioteca padrão do Python em produção. `pytest` é dependência opcional para desenvolvimento.
 
-## Execução da Central N2
+## Execução
 
 ```powershell
 python .\central_n2\main.py
 ```
 
-## Execução do Network / NAC
-
-```powershell
-cd central_n2
-python .\network_nac_cli.py
-```
-
-O módulo NAC nasce em modo seguro: audita e gera plano, mas não salva nem aplica a ACL automaticamente.
-
-## Configuração de endpoints
-
-Edite:
-
-```text
-central_n2/config/settings.json
-```
-
-Os principais itens são timeout, caminho do PsExec, instalador GLPI e catálogo Winget.
-
-## Configuração de OUI
-
-Edite:
-
-```text
-central_n2/config/oui_allowlist.json
-```
-
-Estrutura:
-
-```json
-{
-  "manufacturers": [
-    {"name": "HP", "prefixes": ["00:11:22"]},
-    {"name": "Epson", "prefixes": ["AA:BB:CC"]}
-  ],
-  "exact_macs": [
-    {"name": "Exceção documentada", "mac": "DE:AD:BE:EF:00:01"}
-  ]
-}
-```
-
-Os valores do exemplo acima são apenas ilustrativos. Cadastre somente OUIs realmente validados para o seu parque.
-
-## Segurança operacional do NAC
-
-Nunca trate uma porta de infraestrutura como se fosse porta de usuário. Não aplique política de endpoint indiscriminadamente em:
-
-- uplinks;
-- trunks;
-- outro switch;
-- Access Point que transporte MACs de clientes;
-- hypervisor;
-- firewall/roteador;
-- telefone IP com computador atrás;
-- bridge;
-- servidor que apresente múltiplos MACs.
-
-O fluxo recomendado é:
-
-```text
-AUDITORIA
-   ↓
-INVENTÁRIO / CLASSIFICAÇÃO
-   ↓
-SANEAMENTO
-   ↓
-BANCADA EM 1 PORTA
-   ↓
-PILOTO
-   ↓
-EXPANSÃO
-```
-
-A documentação detalhada está em:
-
-```text
-central_n2/docs/network_nac_intelbras.md
-```
-
-## Perfis Intelbras atuais
-
-### Série 3000
-
-É o perfil habilitado para geração automática de plano OUI `/24`, usando MAC ACL padrão e wildcard.
-
-### S2050G-A
-
-Pode ser auditado e possui suporte de código para ACL exata. A geração automática de política OUI fica bloqueada até validação de sintaxe/firmware específica.
-
-### S-Series
-
-Pode ser auditado e possui suporte de código para ACL exata. A geração OUI automática também fica bloqueada nesta versão.
-
-## WinRM e fallback
-
-```text
-Ação solicitada
-      │
-      ▼
-Test-WSMan
-  │        │
-  OK      falha
-  │        │
-WinRM    PsExec
-  │        │
-  └────┬───┘
-       ▼
-CommandResult
-       │
-       ├── saída
-       ├── erro
-       ├── código
-       ├── duração
-       └── transporte
-```
-
-## Auditoria
-
-Endpoints geram registros em:
-
-```text
-central_n2/logs/YYYY-MM-DD.jsonl
-```
-
-O Network/NAC gera relatórios locais em:
-
-```text
-central_n2/reports/network_nac/
-```
-
-A pasta `reports/` é ignorada pelo Git para evitar versionar informações reais da rede.
-
-Não armazene senhas, tokens ou chaves privadas no repositório.
+Se não estiver elevado, o programa solicita UAC automaticamente.
 
 ## Testes
 
@@ -233,41 +205,18 @@ python -m pip install pytest
 python -m pytest -q
 ```
 
-Os testes cobrem componentes centrais e também:
+O workflow do GitHub Actions compila todos os arquivos Python e executa a suíte em Windows.
 
-- normalização de MAC/OUI;
-- conversão Intelbras;
-- wildcard Série 3000;
-- MAC localmente administrado;
-- parser de tabela MAC;
-- deduplicação;
-- classificação autorizado/não autorizado;
-- resumo por porta;
-- recusa de ACL vazia;
-- validação da faixa de ACL;
-- recusa de política OUI em perfil não validado.
+## Segurança operacional
 
-O workflow `.github/workflows/central-n2-tests.yml` compila o Python e executa `pytest` em Windows.
+Operações disruptivas exigem confirmação textual. Não armazene senhas, tokens, chaves ou credenciais no repositório.
 
-## Limitações conhecidas
+A ferramenta foi projetada para uso administrativo autorizado e deve ser validada primeiro em estações de teste/piloto.
 
-- Winget depende de um contexto remoto em que o executável esteja funcional;
-- ambientes sem WinRM dependem de `ADMIN$`, RPC/SMB e PsExec permitido;
-- o instalador GLPI deve ser ajustado ao ambiente antes de uso externo;
-- OUI reduz equipamentos indevidos, mas não é autenticação forte: MAC pode ser spoofado;
-- o parser de tabela MAC foi feito para formatos comuns e deve ser validado com saída real de cada modelo/firmware;
-- o módulo NAC não salva configuração de switch automaticamente;
-- 802.1X/RADIUS continua sendo a evolução indicada para autenticação forte de endpoints.
+## Documentação detalhada
 
-## Princípios do projeto
+Consulte:
 
-1. preservar o código histórico;
-2. separar interface, regra e transporte;
-3. evitar parsing frágil quando dados estruturados forem possíveis;
-4. preferir PowerShell/CIM ao WMIC;
-5. manter PsExec como fallback;
-6. registrar ações administrativas;
-7. confirmar operações disruptivas;
-8. manter auditoria de rede separada da administração de endpoints;
-9. recusar automaticamente mudanças potencialmente destrutivas quando faltarem dados;
-10. validar em bancada antes de produção.
+```text
+central_n2/docs/workstation_v2.md
+```
