@@ -133,11 +133,13 @@ class JobManager:
             try:
                 with self._locks.hold(host, operation_class):
                     value = func()
-                record.state = JobState.SUCCESS
+                if record.state not in {JobState.TIMEOUT, JobState.CANCELLED}:
+                    record.state = JobState.SUCCESS
                 return value
             except Exception as exc:
-                record.state = JobState.FAILED
-                record.error = f"{type(exc).__name__}: {exc}"
+                if record.state not in {JobState.TIMEOUT, JobState.CANCELLED}:
+                    record.state = JobState.FAILED
+                    record.error = f"{type(exc).__name__}: {exc}"
                 raise
             finally:
                 record.elapsed_seconds = time.monotonic() - started
