@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import base64
+import ctypes
 import json
+import locale
+import os
 import shutil
 import socket
 import subprocess
@@ -40,6 +43,71 @@ class RemoteExecutor:
             if candidate and Path(candidate).exists():
                 return str(candidate)
         return None
+
+    @staticmethod
+    def _console_encoding() -> str | None:
+        """Retorna a code page de saída do console Windows, quando disponível."""
+        if os.name != "nt":
+            return None
+        try:
+            code_page = int(ctypes.windll.kernel32.GetConsoleOutputCP())
+        except (AttributeError, OSError, ValueError):
+            return None
+        return f"cp{code_page}" if code_page > 0 else None
+
+    @classmethod
+    def _decode_output(cls, data: bytes | None, *, preferred: str | None = None) -> str:
+        """Decodifica stdout/stderr sem destruir caracteres acentuados.
+
+        PowerShell executado pela Central é explicitamente configurado para UTF-8.
+        Para comandos nativos do Windows, a code page do console é priorizada.
+        O fallback final usa latin-1 apenas para preservar os bytes em vez de
+        substituí-los por U+FFFD (�).
+        """
+        if not data:
+            return ""
+
+        if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+            try:
+                return data.decode("utf-16")
+            except UnicodeDecodeError:
+                pass
+        if data.startswith(b"\xef\xbb\xbf"):
+            try:
+                return data.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                pass
+
+        candidates: list[str] = []
+        for encoding in (
+            preferred,
+            "utf-8",
+            cls._console_encoding(),
+            locale.getpreferredencoding(False),
+            "cp850",
+            "cp1252",
+        ):
+            if encoding and encoding.lower() not in {item.lower() for item in candidates}:
+                candidates.append(encoding)
+
+        for encoding in candidates:
+            try:
+                return data.decode(encoding, errors="strict")
+            except (LookupError, UnicodeDecodeError):
+                continue
+
+        # Último recurso: mapeamento 1:1 para não perder bytes com replacement chars.
+        return data.decode("latin-1", errors="strict")
+
+    @staticmethod
+    def _powershell_utf8_prefix() -> str:
+        # Windows PowerShell 5.1 não garante UTF-8 quando stdout/stderr é redirecionado.
+        # Definir Console.OutputEncoding evita mojibake na captura feita pelo Python.
+        return (
+            "$__centralN2Utf8 = New-Object System.Text.UTF8Encoding($false); "
+            "[Console]::OutputEncoding = $__centralN2Utf8; "
+            "$OutputEncoding = $__centralN2Utf8; "
+        )
 
     @staticmethod
     def resolve_host(host: str) -> str | None:
@@ -91,6 +159,7 @@ class RemoteExecutor:
         *,
         system: bool = False,
         timeout: int | None = None,
+        output_encoding: str | None = None,
     ) -> CommandResult:
         if not self.psexec_path:
             return CommandResult.failure(
@@ -103,7 +172,13 @@ class RemoteExecutor:
         if system:
             cmd.append("-s")
         cmd.extend([executable, *list(args)])
-        result = self._run_local(cmd, host=host, action="psexec", timeout=timeout)
+        result = self._run_local(
+            cmd,
+            host=host,
+            action="psexec",
+            timeout=timeout,
+            output_encoding=output_encoding,
+        )
         result.transport = "psexec"
         return result
 
@@ -123,12 +198,14 @@ class RemoteExecutor:
         if self.test_winrm(host).success:
             return self.execute_powershell(host, script, timeout=timeout)
 
-        encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+        remote_script = self._powershell_utf8_prefix() + script
+        encoded = base64.b64encode(remote_script.encode("utf-16le")).decode("ascii")
         return self.execute_psexec(
             host,
             "powershell.exe",
             ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
             timeout=timeout,
+            output_encoding="utf-8",
         )
 
     def _run_powershell_local(
@@ -139,11 +216,13 @@ class RemoteExecutor:
         action: str,
         timeout: int | None = None,
     ) -> CommandResult:
+        utf8_script = self._powershell_utf8_prefix() + script
         return self._run_local(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", utf8_script],
             host=host,
             action=action,
             timeout=timeout,
+            output_encoding="utf-8",
         )
 
     def _run_local(
@@ -153,6 +232,7 @@ class RemoteExecutor:
         host: str,
         action: str,
         timeout: int | None = None,
+        output_encoding: str | None = None,
     ) -> CommandResult:
         started = time.perf_counter()
         printable = subprocess.list2cmdline(cmd)
@@ -160,18 +240,18 @@ class RemoteExecutor:
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+                text=False,
                 timeout=timeout or self.timeout,
                 shell=False,
             )
+            stdout = self._decode_output(proc.stdout, preferred=output_encoding).strip()
+            stderr = self._decode_output(proc.stderr, preferred=output_encoding).strip()
             result = CommandResult(
                 success=proc.returncode == 0,
                 command=printable,
                 host=host,
-                stdout=proc.stdout.strip(),
-                stderr=proc.stderr.strip(),
+                stdout=stdout,
+                stderr=stderr,
                 return_code=proc.returncode,
                 duration_ms=int((time.perf_counter() - started) * 1000),
             )
