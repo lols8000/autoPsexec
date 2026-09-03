@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes,json,locale,os,shutil,socket,subprocess,time
+import ctypes,json,locale,os,queue,shutil,socket,subprocess,threading,time
 from pathlib import Path
 from typing import Iterable,Callable
 from .host_identity import HostIdentity
@@ -84,22 +84,105 @@ class RemoteExecutor:
         else:cmd=[str(self.psexec_path),"-accepteula","-nobanner",f"\\\\{host}","cmd.exe","/d","/c",command];enc=None
         r=self._run_local_streaming(cmd,host=host,action="cmd_stream",timeout=timeout,output_encoding=enc,on_line=on_line);r.transport=t.name;return r
     def _run_powershell_local(self,script,*,host,action,timeout=None):return self._run_local(["powershell.exe","-NoProfile","-NonInteractive","-Command",self._powershell_utf8_prefix()+script],host=host,action=action,timeout=timeout,output_encoding="utf-8")
-    def _run_local_streaming(self,cmd,*,host,action,timeout=None,output_encoding=None,on_line=None):
-        started=time.perf_counter();printable=subprocess.list2cmdline(cmd);lines=[]
+    def _run_local_streaming(
+        self,
+        cmd,
+        *,
+        host,
+        action,
+        timeout=None,
+        output_encoding=None,
+        on_line=None,
+    ):
+        started = time.perf_counter()
+        printable = subprocess.list2cmdline(cmd)
+        lines: list[str] = []
+        process = None
+
         try:
-            p=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,shell=False);assert p.stdout is not None;deadline=None if timeout is None else time.monotonic()+timeout
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                shell=False,
+            )
+            assert process.stdout is not None
+
+            events: queue.Queue[bytes | None] = queue.Queue()
+
+            def reader() -> None:
+                try:
+                    for raw_line in iter(process.stdout.readline, b""):
+                        events.put(raw_line)
+                finally:
+                    events.put(None)
+
+            threading.Thread(
+                target=reader,
+                name="central-n2-stream-reader",
+                daemon=True,
+            ).start()
+
+            effective_timeout = timeout or self.timeout
+            deadline = time.monotonic() + effective_timeout
+
             while True:
-                if deadline is not None and time.monotonic()>deadline:p.kill();raise subprocess.TimeoutExpired(cmd,timeout)
-                raw=p.stdout.readline()
-                if not raw and p.poll() is not None:break
-                if raw:
-                    text=self._decode_output(raw,preferred=output_encoding).rstrip();lines.append(text)
-                    if on_line:on_line(text)
-            rc=p.wait();r=CommandResult(rc==0,printable,host,stdout="\n".join(lines),return_code=rc,duration_ms=int((time.perf_counter()-started)*1000))
-        except subprocess.TimeoutExpired:r=CommandResult.failure(host,printable,f"Timeout após {timeout or self.timeout}s",return_code=124);r.duration_ms=int((time.perf_counter()-started)*1000)
-        except OSError as exc:r=CommandResult.failure(host,printable,str(exc),return_code=127);r.duration_ms=int((time.perf_counter()-started)*1000)
-        if self.logger:self.logger.log_result(action,r)
-        return r
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    process.kill()
+                    process.wait(timeout=5)
+                    raise subprocess.TimeoutExpired(cmd, effective_timeout)
+
+                try:
+                    raw = events.get(timeout=min(0.1, remaining))
+                except queue.Empty:
+                    if process.poll() is not None and events.empty():
+                        break
+                    continue
+
+                if raw is None:
+                    break
+
+                text = self._decode_output(
+                    raw,
+                    preferred=output_encoding,
+                ).rstrip()
+                lines.append(text)
+                if on_line:
+                    on_line(text)
+
+            remaining = max(0.1, deadline - time.monotonic())
+            return_code = process.wait(timeout=remaining)
+            result = CommandResult(
+                return_code == 0,
+                printable,
+                host,
+                stdout="\n".join(lines),
+                return_code=return_code,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+        except subprocess.TimeoutExpired:
+            if process and process.poll() is None:
+                process.kill()
+            result = CommandResult.failure(
+                host,
+                printable,
+                f"Timeout após {timeout or self.timeout}s",
+                return_code=124,
+            )
+            result.duration_ms = int((time.perf_counter() - started) * 1000)
+        except OSError as exc:
+            result = CommandResult.failure(
+                host,
+                printable,
+                str(exc),
+                return_code=127,
+            )
+            result.duration_ms = int((time.perf_counter() - started) * 1000)
+
+        if self.logger:
+            self.logger.log_result(action, result)
+        return result
     def _run_local(self,cmd,*,host,action,timeout=None,output_encoding=None):
         started=time.perf_counter();printable=subprocess.list2cmdline(cmd)
         try:
