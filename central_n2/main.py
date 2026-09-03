@@ -13,8 +13,14 @@ def is_admin():
     try:return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except OSError:return False
 def relaunch_as_admin():
-    params=" ".join(f'"{a}"' if " " in a else a for a in sys.argv);rc=ctypes.windll.shell32.ShellExecuteW(None,"runas",sys.executable,params,str(BASE_DIR),1)
-    if rc<=32:raise RuntimeError(f"Não foi possível elevar privilégios. ShellExecute retornou {rc}.")
+    if getattr(sys, "frozen", False):
+        args = sys.argv[1:]
+    else:
+        args = [str(SOURCE_DIR / "main.py"), *sys.argv[1:]]
+    params = " ".join(f'"{a}"' if " " in a else a for a in args)
+    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, str(BASE_DIR), 1)
+    if rc <= 32:
+        raise RuntimeError(f"Não foi possível elevar privilégios. ShellExecute retornou {rc}.")
 def parse_args():
     p=argparse.ArgumentParser(description="Central N2 Workstation");p.add_argument("--gui",action="store_true");p.add_argument("--version",action="store_true");return p.parse_args()
 def main():
