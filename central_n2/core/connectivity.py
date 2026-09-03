@@ -27,13 +27,13 @@ class ConnectivityDiagnostics:
                 "addresses": list(desc.resolved_addresses),
                 "dns": True,
                 "ping": True,
-                "tcp_5985": self._tcp("127.0.0.1", 5985),
-                "tcp_5986": self._tcp("127.0.0.1", 5986),
-                "winrm": self.executor.test_winrm(host).success,
-                "admin_share": True,
+                "tcp_5985": None,
+                "tcp_5986": None,
+                "winrm": None,
+                "admin_share": None,
                 "psexec_available": bool(self.executor.psexec_path),
                 "selected_transport": "local",
-                "diagnosis": "Alvo local detectado; WinRM/PsExec não são necessários.",
+                "diagnosis": "Alvo local detectado; WinRM, ADMIN$ e PsExec foram ignorados.",
             }
 
         addresses = list(desc.resolved_addresses)
