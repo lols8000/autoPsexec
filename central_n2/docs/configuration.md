@@ -1,331 +1,167 @@
-# Configuração — Central N2 Workstation v3
+# Configuração — Central N2 Workstation v5
 
-## 1. Arquivo principal
+## Arquivos
 
-A configuração atualmente é carregada de:
+Base pública:
 
-```text
-central_n2/config/settings.json
-```
+~~~text
+central_n2\config\settings.json
+~~~
 
-Estrutura atual:
+Override local:
 
-```json
+~~~text
+central_n2\config\settings.local.json
+~~~
+
+O ConfigLoader faz merge recursivo: chaves do arquivo local substituem apenas os valores correspondentes, preservando o restante da configuração pública.
+
+## Exemplo atual
+
+~~~json
 {
   "timeout_seconds": 60,
   "psexec_path": "C:\\Windows\\System32\\PsExec.exe",
   "sysinternals_dir": "C:\\Sysinternals",
-  "glpi": {
-    "installer_source": "",
-    "remote_installer_path": "C:\\glpiagentinstall.vbs",
-    "service_names": ["glpi-agent", "GLPI-Agent"]
+  "runtime": {
+    "transport_cache_ttl_seconds": 120,
+    "max_workers": 6,
+    "max_batch_workers": 5,
+    "retry_attempts": 2,
+    "retry_base_delay_seconds": 0.5
   },
-  "software": {
-    "chrome": {"name": "Google Chrome", "winget_id": "Google.Chrome"},
-    "firefox": {"name": "Mozilla Firefox", "winget_id": "Mozilla.Firefox"},
-    "7zip": {"name": "7-Zip", "winget_id": "7zip.7zip"},
-    "vnc": {"name": "UltraVNC", "winget_id": "uvncbvba.UltraVnc"}
+  "glpi_api": {
+    "enabled": false,
+    "base_url": "",
+    "app_token": "",
+    "user_token": ""
   },
-  "compliance": {
-    "min_disk_free_percent": 15,
-    "max_uptime_days": 30,
-    "defender_required": true,
-    "firewall_required": true,
-    "glpi_required": true,
-    "pending_reboot_not_allowed": true
+  "persistence": {
+    "enabled": true,
+    "database": "data/central_n2.db",
+    "snapshot_retention_days": 180
   },
-  "ui": {
-    "heartbeat_seconds": 0.2,
-    "long_operation_timeout_seconds": 3600
+  "updates": {
+    "enabled": true,
+    "repository": "lols8000/autoPsexec",
+    "channel": "stable"
   }
 }
-```
+~~~
 
----
+## PsExec
 
-## 2. `timeout_seconds`
+psexec_path define o caminho preferencial. Se o caminho configurado não existir, o executor também tenta descobrir:
 
-```json
-"timeout_seconds": 60
-```
+~~~text
+PsExec.exe no PATH
+C:\Windows\System32\PsExec.exe
+C:\Sysinternals\PsExec.exe
+~~~
 
-Timeout padrão usado pelo `RemoteExecutor` em operações comuns.
+Validação recomendada:
 
-### Recomendações
+~~~powershell
+Test-Path C:\Sysinternals\PsExec.exe
+Get-Command PsExec.exe -ErrorAction SilentlyContinue
+~~~
 
-- 30–60 s: consultas simples em LAN estável;
-- 60–120 s: ambientes mais lentos ou com estações em redes remotas;
-- não aumentar indiscriminadamente para “resolver” falhas de conectividade;
-- operações longas possuem timeouts próprios na UI/módulos.
+O diretório C:\Sysinternals é recomendado para manter a suíte separada do System32.
 
-Um timeout recorrente deve ser investigado como sintoma de DNS, rede, WinRM, firewall, serviço remoto ou performance da estação.
+## Sysinternals
 
----
+sysinternals_dir aponta para o diretório das ferramentas opcionais, como Autorunsc, ProcDump, Handle e Sigcheck.
 
-## 3. `psexec_path`
+## Runtime
 
-```json
-"psexec_path": "C:\\Windows\\System32\\PsExec.exe"
-```
+- transport_cache_ttl_seconds: tempo de cache da seleção de transporte;
+- max_workers: limite do JobManager;
+- max_batch_workers: limite para lote;
+- retry_attempts: tentativas de preflight/transporte para falhas transitórias;
+- retry_base_delay_seconds: backoff inicial.
 
-Caminho preferencial do `PsExec.exe`.
+Retry não deve ser usado para repetir cegamente remediações destrutivas.
 
-### Validação
+## GLPI Agent
 
-```powershell
-Test-Path "C:\Windows\System32\PsExec.exe"
-```
+A seção glpi configura instalador, caminho remoto e nomes possíveis do serviço.
 
-Se o PsExec estiver em outro local, ajuste o caminho.
+Valores internos devem ficar em settings.local.json.
 
-### Segurança
+## GLPI API
 
-- use somente binário confiável;
-- mantenha controle da origem e versão;
-- não inclua credenciais em linha de comando persistida/configuração;
-- avalie políticas internas antes de distribuir PsExec.
-
----
-
-## 4. `sysinternals_dir`
-
-```json
-"sysinternals_dir": "C:\\Sysinternals"
-```
-
-Diretório local na estação administrativa onde ficam ferramentas opcionais da suíte Sysinternals.
-
-Integrações atuais incluem:
-
-- `autorunsc.exe`;
-- `procdump.exe`;
-- `handle.exe`;
-- `sigcheck.exe`.
-
-A aplicação pode verificar a existência de outras ferramentas, mas não as baixa automaticamente.
-
-### Exemplo de estrutura
-
-```text
-C:\Sysinternals\
-├── Autorunsc.exe
-├── ProcDump.exe
-├── Handle.exe
-├── Sigcheck.exe
-├── PsPing.exe
-├── PsLoggedOn.exe
-├── RAMMap.exe
-└── Procmon.exe
-```
-
----
-
-## 5. `glpi`
-
-```json
-"glpi": {
-  "installer_source": "",
-  "remote_installer_path": "C:\\glpiagentinstall.vbs",
-  "service_names": ["glpi-agent", "GLPI-Agent"]
-}
-```
-
-### `installer_source`
-
-Origem do instalador GLPI utilizado pelo ambiente.
-
-O repositório público mantém esse campo vazio de propósito.
+A API fica desabilitada por padrão.
 
 Exemplo local:
 
-```json
-"installer_source": "\\\\servidor\\share\\glpiagentinstall.vbs"
-```
-
-**Não publique** caminho interno real em repositório público sem necessidade.
-
-### `remote_installer_path`
-
-Caminho onde o instalador será colocado/executado na estação alvo.
-
-### `service_names`
-
-Lista de nomes de serviço que a Central considera como possíveis nomes do GLPI Agent.
-
----
-
-## 6. `software`
-
-Catálogo de aplicações homologadas para operações Winget.
-
-Formato:
-
-```json
-"software": {
-  "chave": {
-    "name": "Nome amigável",
-    "winget_id": "Publisher.Package"
+~~~json
+{
+  "glpi_api": {
+    "enabled": true,
+    "base_url": "https://glpi.exemplo/api",
+    "app_token": "SEGREDO",
+    "user_token": "SEGREDO"
   }
 }
-```
+~~~
 
-Exemplo:
+Nunca commite tokens.
 
-```json
-"chrome": {
-  "name": "Google Chrome",
-  "winget_id": "Google.Chrome"
-}
-```
+## Software / Winget
 
-### Boas práticas
+A seção software define catálogo homologado por nome e winget_id.
 
-- usar IDs exatos;
-- validar instalação em uma estação de teste;
-- não presumir que Winget funciona no mesmo contexto sob PsExec/SYSTEM;
-- documentar aplicações corporativas específicas;
-- evitar comandos de instalação arbitrários inseridos pelo operador.
+Winget pode não funcionar no mesmo contexto em PsExec/SYSTEM.
 
----
+## Compliance / Baseline
 
-## 7. `compliance`
+A configuração ativa um perfil e pode sobrescrever regras como:
 
-```json
-"compliance": {
-  "min_disk_free_percent": 15,
-  "max_uptime_days": 30,
-  "defender_required": true,
-  "firewall_required": true,
-  "glpi_required": true,
-  "pending_reboot_not_allowed": true
-}
-```
+- min_disk_free_percent;
+- max_uptime_days;
+- defender_required;
+- firewall_required;
+- glpi_required;
+- pending_reboot_not_allowed.
 
-### `min_disk_free_percent`
+Perfis versionados: DEFAULT, DESKTOP, NOTEBOOK e TI.
 
-Percentual mínimo de espaço livre esperado no disco C:.
+## Persistência
 
-### `max_uptime_days`
+Quando habilitada, SQLite é criado no caminho configurado. Banco, WAL e relatórios operacionais não devem ser versionados.
 
-Uptime acima desse valor gera desvio/penalidade conforme a lógica atual.
+## Updates
 
-### `defender_required`
+A seção updates define repositório e canal. A aplicação consulta releases e pode baixar artefatos, mas não se substitui silenciosamente.
 
-Define se Defender desabilitado é considerado não conformidade.
+## UI
 
-### `firewall_required`
+heartbeat_seconds controla feedback visual. long_operation_timeout_seconds controla timeout padrão de operações longas.
 
-Define se ausência de perfil de Firewall habilitado é não conformidade.
+Timeout local não garante encerramento de processo remoto já iniciado.
 
-### `glpi_required`
+## O que nunca colocar no arquivo público
 
-Define se GLPI Agent não executando gera desvio.
-
-### `pending_reboot_not_allowed`
-
-Define se reboot pendente é considerado não conformidade.
-
-### Observação importante
-
-Compliance é um baseline operacional da Central, não substitui política formal de segurança, GPO, CIS Benchmark, EDR ou auditoria de conformidade corporativa.
-
----
-
-## 8. `ui`
-
-```json
-"ui": {
-  "heartbeat_seconds": 0.2,
-  "long_operation_timeout_seconds": 3600
-}
-```
-
-### `heartbeat_seconds`
-
-Intervalo visual entre atualizações do spinner/tempo decorrido.
-
-O runner aplica limite mínimo interno de 0,05 s.
-
-Recomendação:
-
-```text
-0.1–0.5 s
-```
-
-Valores muito baixos aumentam escrita no console sem trazer benefício operacional.
-
-### `long_operation_timeout_seconds`
-
-Timeout padrão usado pela UI para operações longas quando o menu não define valor mais específico.
-
-`3600` representa 1 hora.
-
-### Importante
-
-Timeout local não é mecanismo garantido de cancelamento remoto. Consulte [`architecture.md`](architecture.md).
-
----
-
-## 9. Configuração por ambiente
-
-A aplicação **ainda não implementa** merge automático com `settings.local.json`.
-
-Portanto, hoje existem três alternativas:
-
-1. editar `settings.json` somente na cópia operacional e nunca commitar valores internos;
-2. manter patch/configuração privada fora do repositório público;
-3. implementar futuramente um `SettingsLoader` com arquivo local ignorado pelo Git.
-
-A terceira opção é a recomendação arquitetural para evolução.
-
----
-
-## 10. O que nunca colocar no `settings.json` público
-
-- senha de domínio;
-- usuário/senha administrativa;
+- senha;
 - token;
 - API key;
-- chave privada SSH;
-- segredo de aplicação;
-- credencial de proxy;
-- senha de compartilhamento;
-- caminhos internos desnecessários;
+- credencial de domínio;
+- segredo de proxy;
+- chave privada;
+- inventário real;
 - dados pessoais;
-- inventários reais de estações.
+- infraestrutura interna desnecessária.
 
----
+## Checklist
 
-## 11. Validação antes de uso
-
-Após editar configuração:
-
-```powershell
-python -m json.tool .\central_n2\config\settings.json
-```
-
-Depois execute os testes:
-
-```powershell
-cd central_n2
-python -m pytest -q
-```
-
-E faça primeiro uma validação em estação de teste.
-
----
-
-## 12. Exemplo de checklist de configuração
-
-```text
-[ ] Python >= 3.10
-[ ] PsExec no caminho configurado
-[ ] Sysinternals no diretório esperado, se utilizado
-[ ] installer_source GLPI definido localmente, se necessário
-[ ] catálogo Winget validado
-[ ] baseline de compliance aprovado
-[ ] timeout coerente com a rede
-[ ] heartbeat visível e não excessivo
-[ ] teste em estação de bancada concluído
-[ ] nenhum segredo versionado
-```
+~~~text
+[ ] Python >= 3.10 ou pacote distribuído
+[ ] PsExec homologado, se necessário
+[ ] WinRM conforme política, se utilizado
+[ ] settings.local.json fora do Git
+[ ] Sysinternals homologado, se utilizado
+[ ] GLPI configurado localmente
+[ ] baseline aprovado
+[ ] persistência protegida
+[ ] testes em bancada
+~~~
