@@ -1,29 +1,53 @@
 # Changelog
-## 5.0.0 — 2026-09-03
-### Added
-- detecção de alvo local e transporte local;
-- camadas LocalTransport, WinRMTransport e PsExecTransport;
-- TransportManager com cache e fallback seguro apenas para falha de transporte;
-- diagnóstico de conectividade e capability detection;
-- SessionManager para contexto lógico reutilizável;
-- JobManager, classificação de operações e mutex por host;
-- retry seletivo;
-- progresso percentual para DISM RestoreHealth quando o comando fornece percentual;
-- DiagnosticEngine, findings e CorrelationEngine;
-- nove playbooks N2;
-- RemediationEngine com snapshot before/after;
-- SQLite para snapshots, findings, remediações, jobs e relatórios;
-- diff recursivo de snapshots;
-- baselines DEFAULT, DESKTOP, NOTEBOOK e TI;
-- cliente GLPI REST API opcional;
-- auditoria com correlation_id e sanitização de segredos;
-- relatórios Markdown, JSON e TXT;
-- console v5 e GUI Tkinter opcional;
-- verificação controlada de releases;
-- PyInstaller, Inno Setup e workflow de release.
+
+## Unreleased — 2026-09-04
+
 ### Changed
-- health/compliance incluem BitLocker, TPM e Secure Boot;
-- settings.local.json é o local recomendado para caminhos e tokens internos;
-- execução local não exige WinRM quando o hostname selecionado é a própria estação.
+
+- resultados estruturados em lista passam a ser apresentados como tabelas quando possível;
+- inventário de drivers agora normaliza data, agrupa entradas idênticas e reduz registros vazios;
+- view de drivers exibe Dispositivo, Fabricante, Versão, Data, Assinado, INF e Quantidade;
+- parser JSON aceita payload válido mesmo quando o transporte adiciona texto antes/depois;
+- PsExec remove mensagens operacionais sem valor em execuções bem-sucedidas;
+- documentação atualizada para o comportamento v5 real, incluindo settings.local.json e fallback PsExec em ambientes sem WinRM.
+
+### Fixed
+
+- saída de inventário via PsExec não deve mais despejar Starting powershell.exe, exit code 0 ou CLIXML quando forem apenas ruído;
+- JSON estruturado deixa de cair para texto bruto apenas por ruído de transporte;
+- documentação antiga marcada como v3 foi promovida para v5.
+
+### Tests
+
+- teste de parser JSON com ruído PsExec;
+- teste de limpeza de CLIXML em sucesso;
+- teste garantindo preservação de erro real.
+
+## 5.0.0 — 2026-09-03
+
+### Added
+
+- detecção de alvo local e transporte local;
+- LocalTransport, WinRMTransport e PsExecTransport;
+- TransportManager com cache e fallback;
+- diagnóstico de conectividade e capabilities;
+- SessionManager;
+- JobManager e mutex por host;
+- retry seletivo;
+- progresso DISM;
+- DiagnosticEngine e CorrelationEngine;
+- nove playbooks;
+- RemediationEngine com before/after;
+- SQLite;
+- diff de snapshots;
+- baselines DEFAULT, DESKTOP, NOTEBOOK e TI;
+- GLPI REST API opcional;
+- correlation_id e sanitização;
+- relatórios Markdown, JSON e TXT;
+- console v5 e GUI Tkinter;
+- atualização controlada;
+- PyInstaller, Inno Setup e workflow de release.
+
 ### Security
-- logger mascara senha, token, Authorization, API key, Bearer e credenciais antes de persistir.
+
+- logger mascara senha, token, Authorization, API key, Bearer e credenciais.
