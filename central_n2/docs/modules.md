@@ -1,525 +1,236 @@
-# Catálogo de módulos — Central N2 Workstation v3
-
-Este documento descreve as responsabilidades funcionais dos módulos da Central N2.
+# Catálogo de módulos — Central N2 Workstation v5
 
 ## Convenções
 
-- **Consulta:** operação predominantemente somente leitura.
+- **Consulta:** somente leitura.
 - **Remediação:** altera estado da estação.
-- **Disruptiva:** pode interromper serviço, conectividade ou sessão.
-- **Longa:** pode levar dezenas de segundos ou minutos.
-- **Confirmação:** deve ser exigida pela UI quando a ação tiver impacto relevante.
+- **Disruptiva:** pode interromper serviço, rede ou sessão.
+- **Longa:** pode levar minutos.
+- **Confirmação:** exigida quando a ação tem impacto relevante.
 
----
+## Saúde / Compliance
 
-## `health.py` — Saúde da estação
+**health.py** coleta hostname, usuário, Windows/build, fabricante/modelo, CPU, RAM, disco, uptime, reboot pendente, serviços automáticos parados, Defender, Firewall, GLPI, BitLocker, TPM e Secure Boot.
 
-### Objetivo
+**compliance.py** compara o snapshot com o baseline ativo.
 
-Gerar snapshot rápido dos principais sinais de saúde de uma estação e alimentar o score visual.
+Tipo: consulta/análise.
 
-### Dados coletados
+## Performance
 
-- hostname;
-- usuário;
-- sistema operacional/build;
-- fabricante/modelo;
-- CPU;
-- RAM;
-- disco C:;
-- uptime;
-- reboot pendente;
-- serviços automáticos parados;
-- Defender;
-- Firewall;
-- GLPI Agent.
+**performance.py** amostra CPU, RAM, disco e rede e identifica processos dominantes.
 
-### Tipo
+Tipo: consulta temporizada.
 
-Consulta.
+## Reparo do Windows
 
-### Observação
+**repair.py**:
 
-O score é uma heurística operacional, não uma certificação de saúde do equipamento.
+- SFC /scannow;
+- DISM CheckHealth;
+- DISM ScanHealth;
+- DISM RestoreHealth;
+- AnalyzeComponentStore;
+- StartComponentCleanup;
+- CHKDSK /scan;
+- verificação WMI.
 
----
+SFC/DISM/cleanup são operações pesadas. A v5 classifica essas ações para evitar concorrência incompatível por host.
 
-## `compliance.py` — Compliance
+## Dispositivos e drivers
 
-### Objetivo
-
-Comparar o snapshot da estação com o baseline definido em `settings.json`.
-
-### Regras atuais
-
-- espaço livre mínimo;
-- uptime máximo;
-- Defender obrigatório;
-- Firewall obrigatório;
-- GLPI obrigatório;
-- reboot pendente permitido ou não.
-
-### Tipo
-
-Consulta/análise local.
-
----
-
-## `diagnostics.py` — Diagnóstico básico
-
-### Objetivo
-
-Executar preflight, inventário e verificações fundamentais antes de ações mais profundas.
-
-### Uso recomendado
-
-Primeiro passo quando o problema ainda não está classificado.
-
-### Tipo
-
-Consulta.
-
----
-
-## `performance.py` — Performance
-
-### Objetivo
-
-Amostrar a estação por um período e evitar diagnósticos baseados em um único valor instantâneo.
-
-### Coleta
-
-- CPU total;
-- RAM usada;
-- disco ativo;
-- bytes de rede por segundo;
-- top processos por CPU;
-- top processos por memória.
-
-### Tipo
-
-Consulta temporizada.
-
-### Cuidado
-
-Amostragens maiores aumentam tempo de execução. Não é um monitoramento contínuo.
-
----
-
-## `repair.py` — Reparo do Windows
-
-### Operações
-
-- `sfc /scannow`;
-- DISM `/CheckHealth`;
-- DISM `/ScanHealth`;
-- DISM `/RestoreHealth`;
-- DISM `/AnalyzeComponentStore`;
-- DISM `/StartComponentCleanup`;
-- `chkdsk C: /scan`;
-- `winmgmt /verifyrepository`.
-
-### Tipo
-
-Consulta e remediação.
-
-### Risco
-
-SFC/DISM/Component Cleanup podem ser longos e consumir CPU/disco. Devem ser executados conscientemente, preferencialmente sem outras manutenções pesadas simultâneas na mesma estação.
-
----
-
-## `devices.py` — Dispositivos e drivers
-
-### Operações
+**devices.py**:
 
 - dispositivos PnP com erro;
-- inventário de drivers assinados;
-- dispositivos USB presentes;
-- `pnputil /scan-devices`;
-- exportação de drivers com `pnputil /export-driver`.
+- drivers assinados;
+- USB presentes;
+- pnputil /scan-devices;
+- exportação de drivers.
 
-### Tipo
+### Inventário de drivers v5
 
-Consulta e remediação leve.
+O inventário:
 
-### Observação
+- ignora registros completamente vazios;
+- converte DriverDate para yyyy-MM-dd;
+- agrupa entradas idênticas;
+- inclui Count para representar instâncias repetidas;
+- marca a visualização como drivers para a UI usar tabela específica.
 
-Exportação de drivers usa caminho local da estação alvo.
+A apresentação mostra Dispositivo, Fabricante, Versão, Data, Assinado, INF e Quantidade, além de resumo.
 
----
+## Inicialização / Tarefas
 
-## `startup.py` — Inicialização
+**startup.py** consulta Win32_StartupCommand, chaves Run e serviços automáticos parados.
 
-### Coleta
+**tasks.py** lista tarefas, estado, última execução, próxima execução, resultado e falhas.
 
-- `Win32_StartupCommand`;
-- chaves `Run` de HKLM/HKCU;
-- serviços automáticos parados.
+## Crashes / BSOD
 
-### Tipo
+**crashes.py** coleta BugCheck, Minidump, MEMORY.DMP e Application Error/Windows Error Reporting.
 
-Consulta.
+A Central localiza evidência; análise profunda de dump ainda pode exigir WinDbg.
 
-### Uso
+## Segurança
 
-Diagnóstico de lentidão, software persistente e itens de inicialização inesperados.
+**security.py** consulta Defender, proteção em tempo real, assinatura, Firewall, BitLocker, TPM, Secure Boot, RDP, SMBv1, UAC e ameaças recentes.
 
----
+A Central não oferece botão genérico para desativar Defender/Firewall.
 
-## `tasks.py` — Tarefas agendadas
+## Rede
 
-### Operações
-
-- inventário de tarefas;
-- estado;
-- última execução;
-- próximo agendamento;
-- resultado da última execução;
-- filtro de tarefas com falha.
-
-### Tipo
-
-Consulta.
-
----
-
-## `crashes.py` — Crashes e BSOD
-
-### Coleta
-
-- BugCheck em System Event Log;
-- arquivos de `C:\Windows\Minidump`;
-- `C:\Windows\MEMORY.DMP`;
-- eventos Application Error/Windows Error Reporting.
-
-### Tipo
-
-Consulta.
-
-### Limitação
-
-O módulo identifica evidências; ele não substitui WinDbg para análise profunda de dump.
-
----
-
-## `security.py` — Segurança da estação
-
-### Postura consultada
-
-- Microsoft Defender;
-- proteção em tempo real;
-- atualização de assinatura;
-- Firewall;
-- BitLocker;
-- TPM;
-- Secure Boot;
-- RDP;
-- SMBv1;
-- UAC;
-- ameaças recentes.
-
-### Tipo
-
-Consulta.
-
-### Política
-
-Não deve oferecer ações de desativação de Defender ou Firewall.
-
----
-
-## `network.py` — Rede da estação
-
-### Operações
+**network.py**:
 
 - adaptadores;
-- configuração IP;
-- gateway;
-- DNS;
-- renovação DHCP;
+- IP/gateway/DNS;
+- DHCP;
 - flush DNS;
-- reset Winsock;
-- reset TCP/IP;
+- renovação DHCP;
+- reset Winsock/TCP-IP nas rotinas existentes;
 - Wi-Fi;
 - ARP;
 - conexões TCP;
 - teste TCP.
 
-### Tipo
+## Usuários / Perfis
 
-Consulta e remediação.
+**users_profiles.py** consulta administradores locais, perfis, SID, último uso e tamanho. Remoções, quando expostas, são destrutivas e exigem validação forte.
 
-### Risco
+## Software
 
-Reset TCP/IP/Winsock e alteração de Wi-Fi podem afetar conectividade e exigir reboot.
+**software.py**:
 
----
+- inventário por registro;
+- disponibilidade do Winget;
+- operações pelo catálogo configurado.
 
-## `users_profiles.py` — Usuários e perfis
+Winget pode ter comportamento diferente sob PsExec/SYSTEM.
 
-### Operações
+## GLPI Agent
 
-- administradores locais;
-- perfis;
-- tamanho de perfil;
-- SID;
-- último uso;
-- remoção de perfil quando solicitada.
-
-### Tipo
-
-Consulta e remediação destrutiva.
-
-### Regra
-
-Remoção de perfil exige confirmação forte e validação de SID/host correto.
-
----
-
-## `software.py` — Software
-
-### Operações
-
-- inventário pelo registro;
-- presença do Winget;
-- instalação pelo catálogo;
-- upgrade pelo catálogo;
-- remoção pelo catálogo.
-
-### Tipo
-
-Consulta e remediação.
-
-### Limitação
-
-Winget pode não funcionar no mesmo contexto quando a execução remota ocorre como SYSTEM/PsExec. Esse comportamento depende do ambiente.
-
----
-
-## `glpi.py` — GLPI Agent
-
-### Operações
+**glpi.py**:
 
 - status;
 - instalação/reparo;
-- reinício do serviço;
+- reinício de serviço;
 - inventário forçado;
-- consulta de log recente.
+- log recente.
 
-### Dependência de configuração
+installer_source deve ficar em settings.local.json quando contiver infraestrutura interna.
 
-`glpi.installer_source` deve ser configurado para o ambiente.
+## Impressoras
 
-### Segurança
+**printers.py**:
 
-O repositório público mantém esse valor vazio por padrão.
-
----
-
-## `printers.py` — Impressoras
-
-### Operações
-
-- inventário de impressoras;
+- inventário;
 - filas;
 - reinício do Spooler;
 - limpeza de jobs.
 
-### Tipo
+Limpeza de fila remove documentos pendentes.
 
-Consulta e remediação.
+## Domínio / GPO
 
-### Risco
+**domain.py**:
 
-Limpar fila remove jobs pendentes. Deve ser uma decisão consciente do suporte.
+- domínio/membership;
+- DC;
+- Test-ComputerSecureChannel;
+- w32tm;
+- gpresult;
+- reparo de secure channel;
+- gpupdate.
 
----
+## Disco e limpeza
 
-## `domain.py` — Domínio e GPO
-
-### Operações
-
-- domínio e membership;
-- Domain Controller;
-- `Test-ComputerSecureChannel`;
-- `w32tm /query /status`;
-- `gpresult`;
-- reparo do secure channel;
-- `gpupdate` é reutilizado pelo módulo de sistema/UI.
-
-### Tipo
-
-Consulta e remediação.
-
-### Risco
-
-Reparo de secure channel exige contexto administrativo adequado no domínio.
-
----
-
-## `disk.py` — Disco e limpeza
-
-### Operações
+**disk.py**:
 
 - uso do C:;
 - tamanho de perfis;
-- estimativa de espaço recuperável;
-- limpeza de TEMP e lixeira;
-- limpeza segura sem remover Downloads automaticamente.
+- estimativa de limpeza;
+- limpeza segura de temporários e lixeira.
 
-### Tipo
+Downloads não são removidos automaticamente.
 
-Consulta e remediação.
+## Armazenamento / Bateria
 
-### Política
+**storage.py** usa Get-PhysicalDisk e classes WMI/CIM de bateria quando disponíveis.
 
-A ferramenta não deve apagar pastas de usuário arbitrariamente como parte de uma limpeza genérica.
+Nem todo firmware/controlador expõe saúde detalhada.
 
----
+## Ferramentas avançadas
 
-## `storage.py` — Armazenamento físico e bateria
+**workstation_tools.py**:
 
-### Operações
+- certificados;
+- unidades mapeadas;
+- shares locais;
+- proxy;
+- ativação/licenciamento;
+- logons recentes.
 
-- `Get-PhysicalDisk`;
-- serial;
-- tipo de mídia;
-- bus;
-- HealthStatus;
-- OperationalStatus;
-- tamanho;
-- informações de bateria via classes WMI/CIM quando disponíveis.
+## Sysinternals
 
-### Tipo
+**sysinternals.py** integra:
 
-Consulta.
+- Autorunsc;
+- ProcDump;
+- Handle;
+- Sigcheck.
 
-### Limitação
+A Central não baixa a suíte automaticamente.
 
-Nem todo firmware/controlador expõe dados completos de saúde ou bateria.
+## Sistema
 
----
-
-## `workstation_tools.py` — Ferramentas avançadas
-
-### Operações
-
-- certificados `LocalMachine\My`;
-- unidades de rede;
-- compartilhamentos SMB locais;
-- proxy WinHTTP e Internet Settings;
-- ativação/licenciamento Windows;
-- logons recentes no Event Log de Security.
-
-### Tipo
-
-Consulta.
-
----
-
-## `sysinternals.py` — Integração Sysinternals
-
-### Dependência
-
-Diretório configurado em:
-
-```json
-"sysinternals_dir": "C:\\Sysinternals"
-```
-
-### Ferramentas utilizadas
-
-#### Autorunsc
-
-Inventário avançado de persistência/startup.
-
-#### ProcDump
-
-Captura de dump de processo.
-
-#### Handle
-
-Localização de processo que mantém handle aberto para arquivo/recurso.
-
-#### Sigcheck
-
-Assinatura, hash e informações do executável.
-
-### Tipo
-
-Consulta e coleta; ProcDump gera arquivo na estação.
-
-### Política
-
-A Central não baixa executáveis Sysinternals automaticamente.
-
----
-
-## `system.py` — Sistema
-
-### Operações
+**system.py**:
 
 - sessões;
 - processos;
-- finalizar processo;
 - serviços;
-- start/stop/restart de serviço;
+- start/stop/restart;
 - GPUpdate;
 - mensagem ao usuário;
 - restart;
 - shutdown;
 - abort shutdown.
 
-### Tipo
+Ações de energia, kill de processo e parada de serviço são potencialmente disruptivas.
 
-Consulta e remediação/disruptiva.
+## Windows Update
 
-### Risco
-
-Finalização de processo, stop de serviço e energia exigem atenção e confirmação apropriada.
-
----
-
-## `updates.py` — Windows Update
-
-### Operações
+**updates.py**:
 
 - status/histórico;
 - pendências;
-- trigger de scan;
-- reset de componentes do Windows Update.
+- scan;
+- reset de componentes.
 
-### Tipo
+## Pacote de diagnóstico
 
-Consulta e remediação.
+**diagnostic_package.py** agrega evidências para análise/escalonamento. Pacotes podem conter dados internos e não devem ser versionados.
 
----
+## Jobs
 
-## `diagnostic_package.py` — Pacote de diagnóstico
+**core/jobs.py** organiza execução, estado, concorrência e serialização de mutações por host.
 
-### Objetivo
+## Diagnóstico / Correlação
 
-Concentrar diferentes evidências em um artefato local para análise, escalonamento ou documentação de chamado.
+**diagnostics/** normaliza Finding e Diagnosis e correlaciona sinais como pressão de armazenamento, degradação de storage, pressão de recursos, postura de segurança e falha do GLPI Agent.
 
-### Tipo
+## Playbooks
 
-Coleta.
+**playbooks/** define sequências de coleta orientadas por sintoma.
 
-### Segurança
+## Remediação
 
-Pacotes podem conter hostname, usuário, software, endereços e outras informações do ambiente. A pasta de relatórios não deve ser versionada.
+**remediation/** executa ações com snapshot before/after quando configurado.
 
----
+## Persistência
 
-## `batch.py` — Lote
+**storage/database.py** persiste snapshots, jobs, findings, remediações e relatórios.
 
-### Objetivo
+## Apresentação de resultados
 
-Executar operações em múltiplos hosts com limite de concorrência.
+A UI usa tabelas para listas de objetos quando possível. O JSON bruto fica reservado a estruturas complexas sem visualização específica.
 
-### Regra
-
-Ações em lote devem permanecer restritas a operações compatíveis com execução concorrente e com impacto conhecido.
-
-Nunca transformar o módulo de lote em um mecanismo de execução destrutiva massiva sem controles adicionais.
+A camada PsExec filtra ruído operacional em execuções bem-sucedidas sem esconder erro real.
