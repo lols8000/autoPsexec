@@ -1,62 +1,198 @@
 # Central N2 Workstation v5 — arquitetura consolidada
 
-A v5 conclui o plano de evolução da Central N2 para uma plataforma modular de troubleshooting de estações Windows.
+A v5 transforma o autoPsexec histórico em uma plataforma modular de troubleshooting para workstations Windows.
 
-## Fluxo de execução
+## Fluxo
 
-Alvo → HostIdentity → TransportManager → Local/WinRM/PsExec → Session + Connectivity + Capabilities → Snapshot → Findings → Correlação → Playbook → Remediação → Before/After → Relatório → GLPI opcional.
+~~~text
+Alvo
+ ↓
+HostIdentity
+ ↓
+TransportManager
+ ↓
+Local / WinRM / PsExec
+ ↓
+Session + Connectivity + Capabilities
+ ↓
+Snapshot
+ ↓
+Findings
+ ↓
+Correlação
+ ↓
+Playbook
+ ↓
+Remediação
+ ↓
+Before / After
+ ↓
+Relatório / Histórico / GLPI
+~~~
+
+## Transportes
+
+- **Local:** usado quando o alvo é a própria máquina.
+- **WinRM:** preferido em destinos remotos quando utilizável.
+- **PsExec:** fallback quando WinRM não está disponível e o executável existe.
+
+WinRM não é obrigatório. Em redes onde 5985 está bloqueada, PsExec pode continuar operando por SMB/ADMIN$.
+
+O executor descobre PsExec pelo PATH e pelos caminhos C:\Windows\System32\PsExec.exe e C:\Sysinternals\PsExec.exe.
+
+## Saída humana
+
+A interface v5 usa CommandResult.data para apresentar listas estruturadas em tabela quando possível.
+
+O parser de JSON é tolerante a ruído do transporte. Em execuções PsExec bem-sucedidas, a camada de transporte remove mensagens operacionais sem valor para o suporte, como:
+
+- início do processo remoto;
+- encerramento com exit code 0;
+- envelope CLIXML emitido pelo Windows PowerShell.
+
+Erros reais são preservados.
+
+O inventário de drivers agrupa entradas idênticas, normaliza datas, reduz registros vazios e apresenta assinatura em formato humano.
 
 ## Runtime e concorrência
 
-O JobManager mantém um pool configurável. Leituras podem executar de forma concorrente; mutações são serializadas por host para evitar DISM, reset de Windows Update, reinicialização e outras ações pesadas concorrendo na mesma estação.
+JobManager mantém pool configurável. Leituras podem ser concorrentes; mutações por host são serializadas para evitar operações incompatíveis na mesma estação.
 
-Timeout local não significa que um processo remoto já iniciado foi encerrado. Para processos explicitamente iniciados e rastreados existe RemoteProcessController, que devolve PID e permite cancelamento administrativo consciente.
+Estados de job:
+
+- QUEUED
+- RUNNING
+- SUCCESS
+- FAILED
+- TIMEOUT
+- CANCELLED
+
+Timeout local não significa necessariamente cancelamento do processo remoto.
 
 ## Sessões
 
-SessionManager mantém um contexto lógico reutilizável por host com transporte selecionado, diagnóstico de conectividade e capabilities. O cache evita repetir preflight a cada ação. O PowerShell Remoting continua usando processos PowerShell independentes; a sessão lógica não deve ser confundida com um PSSession permanente do PowerShell.
+SessionManager mantém contexto lógico reutilizável por host: transporte, conectividade e capabilities. Não é um PSSession persistente do PowerShell.
 
 ## Capabilities
 
-A Central detecta versão do PowerShell, Windows, Winget, Defender, BitLocker, TPM, Secure Boot, suporte a Get-PhysicalDisk, bateria e GLPI.
+A Central detecta:
+
+- versão do PowerShell;
+- Windows/build;
+- Winget;
+- Defender;
+- BitLocker;
+- TPM;
+- Secure Boot;
+- Get-PhysicalDisk;
+- bateria;
+- GLPI.
+
+Menus podem evitar consultas sem sentido, por exemplo bateria em desktop ou Winget ausente.
 
 ## Diagnóstico e playbooks
 
-O motor separa fatos Finding de hipóteses Diagnosis. Os playbooks cobrem computador lento, rede, impressão, domínio/GPO, Windows Update, crash de aplicação, BSOD, disco cheio e GLPI Agent.
+O motor separa fatos (Finding) de hipóteses (Diagnosis).
 
-## Persistência e diff
+Playbooks disponíveis:
 
-SQLite em data/central_n2.db mantém histórico local. Banco, WAL e relatórios reais são ignorados pelo Git. O diff recursivo compara snapshots.
+- computador lento;
+- rede;
+- impressão;
+- domínio/GPO;
+- Windows Update;
+- crash de aplicação;
+- BSOD;
+- disco cheio;
+- GLPI Agent.
+
+## Remediação
+
+RemediationEngine executa:
+
+~~~text
+snapshot antes
+ ↓
+ação
+ ↓
+snapshot depois
+ ↓
+diff
+~~~
+
+Remediações guiadas atuais:
+
+- limpeza segura;
+- reiniciar Spooler;
+- reset de Windows Update;
+- GPUpdate /force.
+
+## Persistência
+
+SQLite em data/central_n2.db mantém:
+
+- hosts;
+- snapshots;
+- findings;
+- remediações;
+- jobs;
+- relatórios.
+
+O Diff compara snapshots recursivamente.
 
 ## Baselines
 
-Perfis versionados: DEFAULT, DESKTOP, NOTEBOOK e TI. O compliance pode exigir BitLocker, TPM e Secure Boot conforme o perfil.
+Perfis:
+
+- DEFAULT;
+- DESKTOP;
+- NOTEBOOK;
+- TI.
+
+O compliance pode exigir disco livre, uptime, Defender, Firewall, GLPI, ausência de reboot pendente, BitLocker, TPM e Secure Boot.
 
 ## GLPI
 
-Credenciais e URL ficam exclusivamente em config/settings.local.json. A API é desabilitada por padrão. Quando habilitada, a Central cria acompanhamento em chamado usando o relatório gerado.
+settings.local.json é o local de configuração privada.
+
+A API fica desabilitada por padrão. Quando habilitada, a Central pode enviar o relatório gerado como acompanhamento do chamado.
 
 ## Auditoria
 
-Cada evento pode receber correlation_id. Antes de gravar, o logger mascara tokens, senhas, Authorization, Bearer, API keys e campos de credenciais.
+Eventos podem carregar correlation_id. O logger mascara campos sensíveis como senha, token, Authorization, Bearer e API key.
 
 ## Interfaces
 
-Console: python .\main.py
-GUI: python .\main.py --gui
+Console:
 
-A GUI usa worker thread para não congelar a janela durante operações remotas.
+~~~powershell
+python .\main.py
+~~~
+
+GUI:
+
+~~~powershell
+python .\main.py --gui
+~~~
+
+A GUI usa worker thread e não deve bloquear a janela durante operações remotas.
 
 ## Distribuição
 
-PyInstaller: pyinstaller .\CentralN2.spec
-Instalador: iscc .\installer\CentralN2.iss
-Tags v* acionam o workflow de release, que testa, compila, gera pacote portátil, gera instalador e publica ambos no GitHub Release.
-
-## Atualização
-
-A aplicação consulta somente o release mais recente e informa se existe nova versão. Download/instalação não é silencioso: atualização é deliberadamente controlada.
+- PyInstaller gera pacote portátil;
+- Inno Setup gera instalador;
+- workflow Windows executa compileall, pytest, build portátil e smoke do instalador;
+- tags v* acionam workflow de release.
 
 ## Definition of Done
 
-Novo recurso exige tratamento de erro, timeout, retorno visual, resultado estruturado, logging, teste e documentação.
+Novo recurso deve ter:
+
+- tratamento de erro;
+- timeout;
+- retorno visual;
+- resultado estruturado quando aplicável;
+- logging;
+- teste;
+- documentação;
+- comportamento compreensível para o técnico.
