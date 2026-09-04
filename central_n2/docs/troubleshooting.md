@@ -1,480 +1,203 @@
-# Troubleshooting — Central N2 Workstation v3
+# Troubleshooting — Central N2 Workstation v5
 
-Este documento trata problemas da **própria Central N2** e de seus transportes.
+## Central não inicia
 
-## 1. A aplicação não inicia
+Valide Python 3.10+ ou use pacote distribuído.
 
-### Sintoma
-
-```text
-'python' não é reconhecido
-```
-
-### Verificar
-
-```powershell
+~~~powershell
 python --version
-py --version
-```
+~~~
 
-É necessário Python 3.10+.
+## Configuração não encontrada
 
----
-
-## 2. Configuração não encontrada
-
-### Sintoma
-
-```text
-Arquivo de configuração não encontrado
-```
-
-### Verificar
-
-```powershell
+~~~powershell
 Test-Path .\central_n2\config\settings.json
-```
+~~~
 
-Execute a partir da raiz correta do repositório ou preserve a estrutura de diretórios.
+## UAC
 
----
-
-## 3. Falha ao elevar privilégio
-
-### Sintoma
-
-Mensagem de falha de UAC/ShellExecute.
-
-### Verificar
-
-- conta possui permissão administrativa;
-- UAC não foi bloqueado por política;
-- Python executável está acessível;
-- terminal não está em contexto restrito.
-
-Teste manual:
-
-```powershell
+~~~powershell
 Start-Process powershell -Verb RunAs
-```
+~~~
 
----
+## Hostname não resolve
 
-## 4. Host não resolve
-
-### Sintoma
-
-Hostname não é encontrado.
-
-### Testes
-
-```powershell
+~~~powershell
 Resolve-DnsName PC023
 ping PC023
-```
+~~~
 
-Se IP funcionar e hostname não:
+Prefira corrigir DNS a operar permanentemente por IP.
 
-- revisar DNS;
-- sufixo DNS;
-- registro A/PTR;
-- VPN/rede atual;
-- cache DNS local.
+## Ping falha
 
-Evite corrigir apenas usando IP para sempre; o DNS inconsistente deve ser tratado.
+Ping não prova sozinho host offline. Teste serviços.
 
----
-
-## 5. Ping falha
-
-Ping falhar não prova necessariamente que o host está offline, porque ICMP pode ser bloqueado.
-
-Valide outros serviços:
-
-```powershell
+~~~powershell
 Test-NetConnection PC023 -Port 5985
 Test-NetConnection PC023 -Port 445
-```
+~~~
 
-Considere política de firewall.
+## WinRM 5985 falha
 
----
+Se:
 
-## 6. WinRM indisponível
+~~~text
+PingSucceeded: True
+TcpTestSucceeded: False
+RemotePort: 5985
+~~~
 
-### Teste
+a conexão não chegou ao serviço WinRM.
 
-```powershell
-Test-WSMan PC023
-```
+Possíveis causas:
 
-### No host alvo
+- WinRM parado;
+- listener ausente;
+- firewall do endpoint;
+- regra restrita a LocalSubnet;
+- ACL/firewall entre redes;
+- política de domínio.
 
-```powershell
+No destino:
+
+~~~powershell
 Get-Service WinRM
 winrm enumerate winrm/config/listener
-```
+Get-NetConnectionProfile
+~~~
 
-### Possíveis causas
+## WinRM por IP retorna CannotUseIPAddress
 
-- serviço parado;
-- listener ausente;
-- firewall;
-- política de domínio;
-- autenticação;
-- DNS/SPN;
-- perfil de rede;
-- estação fora da rede corporativa.
+Isso é problema de autenticação WinRM por IP, não de reachability.
 
-### Importante
+Em domínio, use hostname/FQDN.
 
-Não aplique configurações WinRM permissivas indiscriminadamente. Ajuste conforme política do ambiente.
+Evite TrustedHosts=*.
 
----
+## Test-WSMan funciona, Invoke-Command falha
 
-## 7. WinRM funciona, mas comando falha
-
-Verifique:
-
-- privilégio do operador;
-- cmdlet disponível no Windows alvo;
-- versão/edição do Windows;
-- módulo PowerShell instalado;
-- comando não disponível em sessão remota;
-- restrições de execução;
-- Double Hop quando acesso a segundo recurso de rede é necessário.
-
----
-
-## 8. PsExec não encontrado
-
-### Teste
-
-```powershell
-Test-Path "C:\Windows\System32\PsExec.exe"
-Get-Command PsExec.exe -ErrorAction SilentlyContinue
-```
-
-Ajuste `psexec_path` se necessário.
-
----
-
-## 9. PsExec retorna Access Denied
-
-Possíveis causas:
-
-- conta sem administração local;
-- UAC remoto;
-- SMB/RPC bloqueado;
-- `ADMIN$` indisponível;
-- políticas de segurança;
-- EDR bloqueando PsExec;
-- estação fora do domínio/contexto esperado.
-
-Testes:
-
-```powershell
-Test-NetConnection PC023 -Port 445
-Test-Path \\PC023\ADMIN$
-```
-
-Não desabilite segurança globalmente para contornar o erro.
-
----
-
-## 10. `ADMIN$` falha
-
-Verifique:
-
-- Server service;
-- compartilhamentos administrativos;
-- firewall;
-- credenciais/contexto;
-- política local/de domínio.
-
-```powershell
-net view \\PC023
-```
-
----
-
-## 11. A Central mostra heartbeat por muito tempo
-
-Heartbeat indica que a UI está viva, mas a operação ainda não retornou.
-
-Perguntas:
-
-1. a operação é naturalmente longa, como DISM/SFC?
-2. a estação está com CPU/disco saturado?
-3. a rede está degradada?
-4. o comando remoto está aguardando alguma condição?
-5. o timeout configurado é razoável?
-
-Não interrompa automaticamente só porque levou alguns minutos.
-
----
-
-## 12. Timeout
-
-### Sintoma
-
-```text
-✗ TIMEOUT
-```
-
-### Procedimento
-
-1. registre qual operação estava rodando;
-2. não repita imediatamente uma manutenção pesada;
-3. verifique processos na estação;
-4. verifique logs/eventos;
-5. confirme se a operação remota continua;
-6. só então decida repetir.
-
-Timeout local não garante encerramento remoto.
-
----
-
-## 13. UI parece parada e não há heartbeat
-
-Isso pode indicar uma operação que não passou pelo `ResponsiveJobRunner` ou um erro anterior à execução do job.
-
-Verifique:
-
-- traceback no console;
-- função chamada diretamente sem `execute()` na UI;
-- input aguardando operador;
-- erro de import;
-- bloqueio durante inicialização.
-
-Ao adicionar novos menus, toda operação longa deve passar pelo wrapper responsivo.
-
----
-
-## 14. Winget não funciona remotamente
-
-Winget depende fortemente de contexto.
-
-Sob PsExec/SYSTEM ele pode:
-
-- não estar no PATH;
-- não possuir App Installer no contexto esperado;
-- não enxergar fontes do usuário;
-- não conseguir instalar pacote que exige sessão interativa.
-
-Teste local no host:
-
-```powershell
-winget --info
-Get-Command winget.exe
-```
-
-Se funcionar para usuário e não para SYSTEM, trate como limitação de contexto, não necessariamente bug da Central.
-
----
-
-## 15. GLPI status funciona, instalação não
-
-Verifique:
-
-```json
-"glpi": {
-  "installer_source": "..."
-}
-```
-
-O valor público vem vazio.
-
-Valide acesso ao compartilhamento a partir do contexto utilizado pela execução remota.
-
-Atenção a Double Hop quando WinRM precisa acessar um share de terceiro servidor.
-
----
-
-## 16. Sysinternals aparece como ausente
-
-Verifique:
-
-```powershell
-Get-ChildItem C:\Sysinternals
-```
-
-E configuração:
-
-```json
-"sysinternals_dir": "C:\\Sysinternals"
-```
-
-Nomes esperados incluem `Autorunsc.exe`, `ProcDump.exe`, `Handle.exe` e `Sigcheck.exe`.
-
----
-
-## 17. ProcDump falha
-
-Verifique:
-
-- executável presente;
-- processo existe;
-- privilégio suficiente;
-- caminho de saída permitido;
-- espaço em disco;
-- EDR não bloqueou criação do dump.
-
-Dumps podem ser grandes e conter dados sensíveis em memória.
-
----
-
-## 18. Get-Printer falha
-
-Possíveis causas:
-
-- módulo PrintManagement indisponível;
-- Spooler parado;
-- versão/edição Windows;
-- sessão remota com restrições.
+Test-WSMan prova listener WSMan, não necessariamente autenticação PowerShell Remoting completa.
 
 Teste:
 
-```powershell
-Get-Service Spooler
-Get-Command Get-Printer
-```
+~~~powershell
+Invoke-Command -ComputerName PC023 -ScriptBlock { hostname }
+~~~
 
----
+## PsExec não encontrado
 
-## 19. Get-BitLockerVolume falha
+~~~powershell
+Test-Path C:\Sysinternals\PsExec.exe
+Test-Path C:\Windows\System32\PsExec.exe
+Get-Command PsExec.exe -ErrorAction SilentlyContinue
+~~~
 
-Possíveis causas:
+## Instalar PsExec na estação administrativa
 
-- cmdlet não disponível;
-- edição do Windows;
-- recurso BitLocker ausente;
-- privilégio insuficiente.
+A Central não instala automaticamente. Use binário homologado da Microsoft Sysinternals e coloque em diretório controlado, por exemplo:
 
-O módulo trata várias consultas como opcionais; ausência de dado não deve ser interpretada automaticamente como BitLocker desativado.
+~~~text
+C:\Sysinternals\PsExec.exe
+~~~
 
----
+Feche e reabra a Central depois de copiar o executável, pois o executor descobre PsExec na inicialização.
 
-## 20. TPM/Secure Boot retornam vazio
+## Validar PsExec
 
-Pode ocorrer em:
+~~~powershell
+Test-NetConnection PC023 -Port 445
+dir \\PC023\ADMIN$
+C:\Sysinternals\PsExec.exe -accepteula \\PC023 hostname
+~~~
 
-- hardware sem TPM;
-- BIOS legado;
-- VM;
-- equipamento sem UEFI;
-- cmdlet não suportado;
-- restrição remota.
+## ADMIN$ funciona e WinRM não
 
-Considere `null` como “não foi possível obter” antes de concluir “desativado”.
+Isso é um cenário suportado.
 
----
+~~~text
+445/ADMIN$ OK + PsExec disponível → fallback PsExec
+~~~
 
-## 21. Dados de bateria ausentes
+Não é obrigatório abrir 5985 somente para a Central funcionar.
 
-Normal em:
+## PsExec Access Denied
 
-- desktops;
-- bateria não exposta via WMI;
-- firmware limitado;
-- equipamento sem driver ACPI adequado.
+Verifique:
 
----
+- conta administrativa;
+- ADMIN$;
+- UAC remoto;
+- política/EDR;
+- contexto de domínio.
 
-## 22. `Get-PhysicalDisk` não mostra saúde esperada
+Não desative segurança globalmente.
 
-Alguns controladores RAID, drivers e dispositivos USB abstraem os dados.
+## Saída mostra Starting powershell.exe / CLIXML
 
-O resultado representa o que o Windows Storage Management expõe, não telemetria SMART universal.
+No master atual, isso deve ser filtrado em execuções PsExec bem-sucedidas.
 
----
+Se reaparecer:
 
-## 23. Security Event Log falha
+1. confirme git pull;
+2. reinicie a Central;
+3. confirme versão/commit;
+4. preserve a saída em caso de falha real.
 
-Consultar log Security normalmente exige privilégio elevado.
+## JSON bruto em listas
 
-Também pode ser limitado por:
+A UI atual tenta renderizar listas de dicionários como tabela. Se JSON bruto aparecer, pode ser:
 
-- tamanho do log;
-- auditoria desabilitada;
-- filtro sem eventos;
-- acesso remoto.
+- estrutura complexa;
+- parser não encontrou JSON válido;
+- retorno textual do comando;
+- execução em versão antiga.
 
----
+## DriverDate aparece como /Date(...)/
 
-## 24. Testes falham
+O módulo de drivers atual normaliza data para yyyy-MM-dd antes de serializar.
 
-Execute:
+Se aparecer formato legado, atualize o master e reinicie.
 
-```powershell
-cd central_n2
-python -m compileall .
-python -m pytest -q
-```
+## Winget não funciona via PsExec
 
-Para um teste específico:
+Winget pode depender do perfil do usuário/App Installer e não existir sob SYSTEM.
 
-```powershell
-python -m pytest tests\test_v3_responsive.py -vv
-```
+## GLPI
 
-### Antes de alterar código por causa de teste
+Se status funciona e instalação não, valide installer_source no settings.local.json e acesso ao recurso de origem.
 
-Determine se:
+## Sysinternals ausente
 
-- o teste está errado;
-- o comportamento mudou intencionalmente;
-- existe regressão real;
-- é flutuação temporal/race condition.
+~~~powershell
+Get-ChildItem C:\Sysinternals
+~~~
 
----
+## Timeout
 
-## 25. Logs
+Não repita uma remediação pesada imediatamente. Timeout local não prova término remoto.
 
-Consulte:
+## Bateria ausente
 
-```text
-central_n2/logs/
-```
+Normal em desktop ou firmware que não expõe dados.
 
-Use logs para correlacionar:
+## Get-PhysicalDisk incompleto
 
-- ação;
-- host;
-- transporte;
-- duração;
-- erro.
+Controladores podem esconder telemetria.
 
-Não publique logs reais em issue/repositório público sem sanitização.
+## Logs
 
----
+Consulte central_n2/logs. Não publique logs reais sem sanitização.
 
-## 26. Pacotes de diagnóstico
+## Checklist rápido
 
-Diretório esperado:
-
-```text
-central_n2/reports/diagnostics/
-```
-
-Se a geração falhar:
-
-- validar permissão local;
-- espaço em disco;
-- caracteres inválidos;
-- algum módulo remoto que não retornou;
-- diretório de reports.
-
----
-
-## 27. Checklist rápido de conectividade
-
-```powershell
+~~~powershell
 Resolve-DnsName PC023
 Test-NetConnection PC023 -Port 5985
 Test-NetConnection PC023 -Port 445
-Test-WSMan PC023
 Test-Path \\PC023\ADMIN$
-```
+Test-Path C:\Sysinternals\PsExec.exe
+Test-WSMan PC023
+~~~
 
-Interprete cada teste separadamente; não reduza tudo a “máquina offline”.
+Interprete cada camada separadamente.

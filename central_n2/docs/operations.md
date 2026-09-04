@@ -1,718 +1,254 @@
-# Manual operacional — Central N2 Workstation v3
+# Manual operacional — Central N2 Workstation v5
 
-## 1. Objetivo do manual
+## Princípio
 
-Este documento descreve como o suporte N2 deve operar a Central de forma previsível e segura.
+~~~text
+EVIDÊNCIA → DIAGNÓSTICO → REMEDIAÇÃO → VALIDAÇÃO → REGISTRO
+~~~
 
-A ferramenta deve ser utilizada com a seguinte sequência mental:
+Evite executar reparos apenas porque existem no menu.
 
-```text
-Identificar host
-    ↓
-Confirmar conectividade
-    ↓
-Coletar saúde
-    ↓
-Classificar sintoma
-    ↓
-Diagnosticar
-    ↓
-Remediar
-    ↓
-Validar novamente
-    ↓
-Registrar evidência
-```
+## Inicialização
 
-Evite começar por uma ação de reparo apenas porque ela existe no menu.
-
----
-
-## 2. Inicialização
-
-Na raiz do repositório:
-
-```powershell
+~~~powershell
 python .\central_n2\main.py
-```
+~~~
 
-A aplicação:
+A Central eleva via UAC quando necessário.
 
-1. valida Windows;
-2. valida configuração;
-3. solicita elevação administrativa via UAC se necessário;
-4. inicializa executor, logger e UI responsiva.
+## Selecionar estação
 
-### Saída esperada
+Informe hostname ou IP. Hostname é preferível em ambientes de domínio.
 
-```text
-╔════════════════════════════════════════════════════╗
-║        CENTRAL N2 WORKSTATION — V3 RESPONSIVA     ║
-╚════════════════════════════════════════════════════╝
+Na seleção, a Central abre sessão lógica, identifica transporte/capabilities e coleta snapshot inicial.
 
-Alvo: nenhum
-```
+## Interpretar transporte
 
----
+### local
 
-## 3. Seleção da estação
+A própria máquina foi detectada. WinRM e PsExec são ignorados.
 
-Escolha:
+### winrm
 
-```text
-[1] Selecionar estação
-```
+PowerShell Remoting foi selecionado.
 
-Informe hostname ou IP.
+### psexec
 
-Preferência operacional: use hostname quando DNS e inventário corporativo estiverem consistentes.
+WinRM não estava utilizável e PsExec foi selecionado.
 
-### Primeiro retorno
+## Cenário comum: WinRM bloqueado, PsExec disponível
 
-A UI executa snapshot de saúde com feedback visual:
+Exemplo operacional real:
 
-```text
-| Pré-flight da estação...  1.2s
-```
+~~~text
+Ping .............. OK
+TCP 5985 .......... FAIL
+TCP 445 ........... OK
+ADMIN$ ............ OK
+PsExec local ...... OK
+~~~
 
-Quando houver resultado:
+Isso significa que a estação continua administrável por PsExec.
 
-```text
-✓ SUCESSO [winrm]
-```
+Teste:
 
-ou fallback:
+~~~powershell
+Test-NetConnection PC023 -Port 445
+Test-Path \\PC023\ADMIN$
+Test-Path C:\Sysinternals\PsExec.exe
+C:\Sysinternals\PsExec.exe -accepteula \\PC023 hostname
+~~~
 
-```text
-✓ SUCESSO [psexec]
-```
+## WinRM por IP
 
-ou falha explícita.
+WinRM com autenticação padrão pode falhar quando o alvo é um IP. Em domínio, prefira hostname/FQDN.
 
----
+Não amplie TrustedHosts para * indiscriminadamente.
 
-## 4. Como interpretar o heartbeat
+## Saída da Central
 
-Durante uma operação longa:
+Resultado:
 
-```text
-| SFC /scannow...  18.4s
-```
+~~~text
+✓ SUCESSO [psexec] — 48060 ms
+~~~
 
-Isso significa:
+Listas estruturadas são mostradas em tabela quando possível.
 
-- a UI principal continua respondendo;
-- o worker continua aguardando resultado;
-- o tempo decorrido continua sendo atualizado;
-- a Central não concluiu ainda a operação.
+A Central filtra ruído de PsExec/PowerShell em sucesso, mas preserva mensagens de erro.
 
-### Heartbeat não significa progresso percentual
+## Drivers
 
-O spinner indica **atividade da Central**, não porcentagem real do DISM/SFC/comando remoto.
+Menu 5 → opção Drivers.
 
-Não interprete:
+A saída mostra:
 
-```text
-30 segundos
-```
-
-como “30%”.
-
----
-
-## 5. Status finais
-
-### Sucesso
-
-```text
-✓ SUCESSO [winrm] — 8254 ms
-```
-
-O transporte entre colchetes ajuda a diagnosticar o caminho utilizado.
-
-### Falha
-
-```text
-✗ FALHA [psexec]
-Erro: Access denied
-```
-
-Leia `stderr` antes de repetir a ação.
-
-### Timeout
-
-```text
-✗ TIMEOUT
-Operação 'DISM RestoreHealth' excedeu 3600s
-```
-
-Um timeout local significa que a Central deixou de aguardar o resultado.
-
-**Não significa necessariamente que o processo remoto foi encerrado.**
-
-Antes de executar novamente uma operação pesada, valide se o processo ainda está ativo na estação.
-
----
-
-## 6. Saúde / Compliance
-
-Menu:
-
-```text
-[2] Saúde / Compliance
-```
-
-Use como triagem inicial.
-
-Exemplo:
-
-```text
-Score: 72/100
-CPU: 48%
-RAM: 81%
-Disco livre: 7%
-Uptime: 44 dias
-
-[HIGH] Disco C: abaixo do mínimo
-[MEDIUM] Reinicialização pendente
-```
-
-### Interpretação
-
-O score prioriza investigação, mas não determina sozinho a causa do chamado.
-
-Exemplo: disco crítico pode ser relevante para lentidão, mas não explica necessariamente uma falha de impressão de rede.
-
----
-
-## 7. Performance
-
-Menu:
-
-```text
-[3] Performance
-```
-
-### Amostragem rápida
-
-Use para triagem.
-
-### Amostragem detalhada
-
-Use quando a lentidão é intermitente ou não aparece em uma fotografia instantânea.
-
-Procure:
-
-- CPU média e pico;
-- RAM;
-- atividade de disco;
-- tráfego de rede;
-- processos dominantes.
-
-### Evite
-
-Rodar amostragem continuamente como monitoramento permanente. O módulo é uma ferramenta de diagnóstico pontual.
-
----
-
-## 8. Reparo do Windows
-
-Menu:
-
-```text
-[4] Reparo do Windows
-```
-
-### Sequência recomendada
-
-Para suspeita de corrupção:
-
-```text
-DISM CheckHealth
-      ↓
-DISM ScanHealth
-      ↓
-DISM RestoreHealth, se necessário
-      ↓
-SFC /scannow
-```
-
-A ordem pode variar conforme diagnóstico, mas evite executar todas as opções automaticamente “por garantia”.
-
-### Component Store cleanup
-
-É remediação. Use quando houver justificativa operacional.
-
-### CHKDSK `/scan`
-
-É uma verificação online. Se indicar problema que exija correção offline/reboot, trate isso separadamente.
-
-### WMI repository
-
-O módulo atual verifica consistência; não faça reset/rebuild agressivo sem diagnóstico adicional.
-
----
-
-## 9. Hardware / Drivers / Dispositivos
-
-Menu:
-
-```text
-[5] Hardware / Drivers / Dispositivos
-```
-
-Use em casos de:
-
-- placa de rede sem funcionar;
-- USB não reconhecido;
-- áudio/vídeo com erro;
-- dispositivo Code 10/Code 43;
-- driver suspeito;
-- pós-formatação;
-- necessidade de backup de drivers.
-
-### Exportar drivers
-
-A exportação grava arquivos na estação alvo. Confirme espaço e destino antes de uso em massa.
-
----
-
-## 10. Inicialização / Tarefas
-
-Menu:
-
-```text
-[6] Inicialização / Tarefas
-```
-
-Útil para:
-
-- boot/login lento;
-- programas abrindo sozinhos;
-- software persistente;
-- tarefas corporativas falhando;
-- automações que deixaram de executar.
-
-### Tarefa com falha
-
-`LastTaskResult != 0` é um indicador, não diagnóstico completo. Consulte histórico/eventos da tarefa quando necessário.
-
----
-
-## 11. Crashes / BSOD
-
-Menu:
-
-```text
-[7] Crashes / BSOD
-```
-
-Use para:
-
-- reinicialização inesperada;
-- tela azul;
-- aplicação fechando;
-- crash recorrente.
-
-A Central localiza evidências e dumps, mas análise aprofundada de dump pode exigir WinDbg/N3.
-
-### Fluxo recomendado
-
-```text
-Identificar data/hora
-      ↓
-BugCheck / Application Error
-      ↓
-Localizar dump
-      ↓
-Coletar pacote
-      ↓
-Escalonar, se necessário
-```
-
----
-
-## 12. Segurança
-
-Menu:
-
-```text
-[8] Segurança
-```
-
-Valide:
-
-- Defender;
+- dispositivo;
+- fabricante;
+- versão;
+- data;
 - assinatura;
-- Firewall;
-- BitLocker;
-- TPM;
-- Secure Boot;
-- RDP;
-- SMBv1;
-- UAC;
-- ameaças recentes.
+- INF;
+- quantidade agrupada.
 
-A Central não deve ser utilizada para burlar controles corporativos.
+Registros vazios são reduzidos e entradas idênticas são agrupadas.
 
----
+## Saúde / Compliance
 
-## 13. Rede
+Use como triagem inicial. O score é heurística, não prova de causa.
 
-Menu:
+## Performance
 
-```text
-[9] Rede
-```
+Use amostragem para lentidão. Observe CPU, RAM, disco, rede e processos dominantes.
 
-### Diagnóstico recomendado
+## Reparo Windows
 
-```text
-Interface
-   ↓
-IP
-   ↓
-Gateway
-   ↓
-DNS
-   ↓
-ARP/conexões
-   ↓
-teste específico
-```
+Sequência típica para suspeita de corrupção:
 
-### Flush DNS
+~~~text
+CheckHealth → ScanHealth → RestoreHealth, se necessário → SFC
+~~~
 
-Baixo impacto relativo; use quando houver suspeita de cache incorreto.
+Não execute tudo por rotina.
 
-### Renovar DHCP
+## Hardware / Dispositivos
 
-Pode alterar IP e interromper conectividade temporariamente.
+Use para Code 10/43, USB, driver suspeito e backup/exportação.
 
-### Reset Winsock/TCP-IP
+## Inicialização / Tarefas
 
-Ação mais agressiva. Use somente após diagnóstico e considere necessidade de reboot.
+Use em boot/login lento, persistência e tarefas corporativas com falha.
 
----
+## Crashes / BSOD
 
-## 14. Usuários / Perfis
+Localize BugCheck, dumps e Application Error. Para análise profunda, escale com dump.
 
-Menu:
+## Segurança
 
-```text
-[10] Usuários / Perfis
-```
+Use para postura, não para burlar controles.
 
-Verifique:
+## Rede
 
-- sessão ativa;
-- administradores locais;
-- tamanho de perfil;
-- perfis antigos;
-- SID correto antes de qualquer remoção.
+Diagnóstico recomendado:
 
-### Remoção de perfil
+~~~text
+interface → IP → gateway → DNS → TCP específico
+~~~
 
-É uma ação destrutiva.
+Flush DNS e DHCP têm impacto menor; reset de stack é mais agressivo.
 
-Antes de remover:
+## Usuários / Perfis
 
-```text
-[ ] usuário não está logado
-[ ] dados necessários foram preservados
-[ ] SID foi validado
-[ ] host correto foi validado
-[ ] chamado autoriza a ação
-```
+Antes de remoção de perfil, valide host, SID, sessão, dados e autorização.
 
----
+## Software / GLPI Agent
 
-## 15. Software / GLPI
+Inventarie antes de instalar/remover. Winget pode diferir sob SYSTEM/PsExec.
 
-Menu:
+## Impressoras
 
-```text
-[11] Software / GLPI
-```
+~~~text
+inventário → fila → spooler → driver/rede
+~~~
 
-### Software
+## Domínio / GPO
 
-Use inventário antes de instalação/remoção.
+Verifique DC, hora, secure channel e gpresult antes de repair/gpupdate.
 
-### Winget
+## Disco / Armazenamento
 
-Se falhar remotamente, considere diferença entre contexto interativo do usuário e contexto SYSTEM/PsExec.
+Use espaço, perfis, estimativa de limpeza e saúde física.
 
-### GLPI
+## Sysinternals
 
-Antes de instalar/reparar, `installer_source` precisa estar configurado localmente.
+Ferramentas opcionais devem existir em diretório homologado.
 
----
+## Pacote de diagnóstico
 
-## 16. Impressoras
+Use para escalonamento. Proteja o conteúdo.
 
-Menu:
+## Energia / Processos / Serviços
 
-```text
-[12] Impressoras
-```
+Kill, stop, restart e shutdown podem causar perda de trabalho.
 
-Fluxo recomendado:
+## Conectividade / Capabilities
 
-```text
-Inventário
-   ↓
-Fila
-   ↓
-Spooler
-   ↓
-conectividade/driver
-   ↓
-remediação
-```
+Use quando a própria Central não consegue executar algo. Separe:
 
-Limpar fila remove jobs pendentes. Confirme impacto com o usuário quando aplicável.
+- DNS;
+- ping;
+- 5985/5986;
+- ADMIN$;
+- transporte selecionado;
+- capabilities.
 
----
+## Playbooks
 
-## 17. Domínio / GPO
+Escolha o sintoma e deixe a Central coletar evidências correlacionadas.
 
-Menu:
+## Histórico / Diff
 
-```text
-[13] Domínio / GPO
-```
+Use para responder: “o que mudou desde o último atendimento?”.
 
-Use para:
+## Relatório
 
-- GPO não aplicada;
-- confiança quebrada;
-- autenticação de domínio;
-- horário incorreto;
-- DC inesperado.
+Gere depois de diagnóstico/remediação. O correlation_id liga relatório, jobs e auditoria.
 
-### Secure channel repair
+## Jobs
 
-É remediação. Exige contexto correto e deve ser executado somente se o canal realmente estiver quebrado.
+Consulte estado e tempo das operações.
 
----
+## GLPI API
 
-## 18. Disco / Armazenamento / Bateria
+Gere relatório antes de enviar ao chamado.
 
-Menu:
+## Remediações guiadas
 
-```text
-[14] Disco / Armazenamento / Bateria
-```
+Mostram impacto, exigem confirmação quando necessário e registram before/after.
 
-### Disco lógico
+## Baseline
 
-Observe espaço livre.
+Escolha DEFAULT, DESKTOP, NOTEBOOK ou TI conforme o tipo de estação.
 
-### Perfis
+## Timeout
 
-Use análise de tamanho antes de limpar.
+Timeout local não garante encerramento remoto.
 
-### Limpeza
+Antes de repetir operação pesada:
 
-A rotina segura atual remove TEMP e lixeira; não apaga Downloads automaticamente.
+1. verifique se o processo continua;
+2. consulte logs;
+3. aguarde se necessário;
+4. só então repita.
 
-### Disco físico
-
-`HealthStatus` depende do que o stack de armazenamento e firmware expõem ao Windows.
-
-### Bateria
-
-Dados podem estar ausentes em desktops ou em equipamentos cujo firmware não fornece informações completas.
-
----
-
-## 19. Ferramentas avançadas
-
-Menu:
-
-```text
-[15] Ferramentas avançadas
-```
-
-Inclui:
-
-- certificados;
-- unidades mapeadas;
-- shares locais;
-- proxy;
-- ativação Windows;
-- logons recentes.
-
-Essas consultas são úteis para problemas corporativos que não aparecem em “hardware/rede” de forma óbvia.
-
----
-
-## 20. Sysinternals
-
-Menu:
-
-```text
-[16] Sysinternals
-```
-
-Dependência: ferramentas precisam existir no diretório configurado.
-
-### Autorunsc
-
-Diagnóstico avançado de inicialização/persistência.
-
-### ProcDump
-
-Gera dump de um processo. Use quando houver crash/travamento que precisa de evidência para análise.
-
-### Handle
-
-Identifica qual processo mantém determinado arquivo/recurso aberto.
-
-### Sigcheck
-
-Consulta assinatura/hash de executável.
-
----
-
-## 21. Pacote de diagnóstico
-
-Menu:
-
-```text
-[17] Pacote de diagnóstico
-```
-
-Use antes de escalonar para N3 ou quando o chamado precisar de evidência técnica.
-
-Os relatórios podem conter dados internos. Trate-os conforme política da organização.
-
----
-
-## 22. Energia / Processos / Serviços
-
-Menu:
-
-```text
-[18] Energia / Processos / Serviços
-```
-
-### Processos
-
-Finalizar processo pode causar perda de dados não salvos.
-
-### Serviços
-
-Antes de parar/reiniciar um serviço, identifique dependências e impacto.
-
-### Reiniciar/desligar
-
-Confirmar:
-
-```text
-[ ] host correto
-[ ] usuário foi avisado
-[ ] janela de manutenção permite
-[ ] não há tarefa crítica ativa
-```
-
----
-
-## 23. Quando interromper a Central
-
-`Ctrl+C` encerra a espera local e a aplicação trata `KeyboardInterrupt`.
-
-No entanto, uma operação remota já iniciada pode continuar executando.
-
-Para ações longas, depois de interromper a UI, valide estado remoto antes de repetir o comando.
-
----
-
-## 24. Fluxos práticos
+## Fluxos práticos
 
 ### Lentidão
 
-```text
-Saúde
- ↓
-Performance
- ↓
-Disco / startup
- ↓
-Eventos
- ↓
-reparo somente se houver evidência
-```
+~~~text
+Saúde → Performance → Disco/Startup → Playbook lento → remediação se justificada
+~~~
 
 ### Sem rede
 
-```text
-Interfaces
- ↓
-IP/Gateway/DNS
- ↓
-DHCP
- ↓
-teste TCP/DNS
- ↓
-flush/renew/reset somente conforme causa
-```
+~~~text
+IP/Gateway/DNS → TCP → DHCP/flush apenas conforme causa
+~~~
 
 ### Impressão
 
-```text
-Inventário
- ↓
-Fila
- ↓
-Spooler
- ↓
-rede/driver
-```
+~~~text
+Inventário → fila → Spooler → driver/rede
+~~~
 
-### BSOD
+### Domínio
 
-```text
-Crashes/BSOD
- ↓
-BugCheck
- ↓
-Dump
- ↓
-Pacote de diagnóstico
-```
+~~~text
+DC → hora → secure channel → gpresult → repair/gpupdate se necessário
+~~~
 
-### Problema de domínio
+### WinRM indisponível
 
-```text
-Domínio/GPO
- ↓
-DC
- ↓
-horário
- ↓
-secure channel
- ↓
-gpresult
- ↓
-repair/gpupdate se necessário
-```
-
----
-
-## 25. Princípio operacional
-
-A ferramenta existe para reduzir tentativa e erro.
-
-Prefira sempre:
-
-```text
-EVIDÊNCIA → DIAGNÓSTICO → REMEDIAÇÃO → VALIDAÇÃO
-```
-
-em vez de:
-
-```text
-SFC + DISM + RESET + REBOOT “para ver se resolve”
-```
+~~~text
+5985 FAIL → 445 → ADMIN$ → PsExec → continuar atendimento
+~~~
