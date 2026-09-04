@@ -64,11 +64,35 @@ class RemoteExecutor:
         if t.name=="winrm" and self._is_transport_failure(r) and self.psexec_transport.available():
             self.transport_manager.invalidate(host);f=self.psexec_transport.execute_powershell(host,script,timeout=timeout);f.metadata["fallback_from"]="winrm";return f
         return r
+    @staticmethod
+    def _parse_json_output(text):
+        """Extrai o primeiro JSON válido mesmo quando o transporte adiciona ruído."""
+        if not text or not text.strip():
+            return None
+        value=text.strip()
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            pass
+        decoder=json.JSONDecoder()
+        for index,char in enumerate(value):
+            if char not in "[{":
+                continue
+            try:
+                data,_=decoder.raw_decode(value[index:])
+                return data
+            except json.JSONDecodeError:
+                continue
+        return None
+
     def execute_powershell_json(self,host,script,*,timeout=None):
         r=self.execute_powershell(host,f"$r=& {{ {script} }};$r|ConvertTo-Json -Depth 8 -Compress",timeout=timeout)
         if r.success and r.stdout.strip():
-            try:r.data=json.loads(r.stdout.strip())
-            except json.JSONDecodeError:r.metadata["json_parse_error"]=True
+            parsed=self._parse_json_output(r.stdout)
+            if parsed is not None:
+                r.data=parsed
+            else:
+                r.metadata["json_parse_error"]=True
         return r
     def execute_psexec(self,host,executable,args:Iterable[str]=(),*,system=False,timeout=None,output_encoding=None):return self.psexec_transport.execute_raw(host,executable,list(args),system=system,timeout=timeout,output_encoding=output_encoding)
     def execute_cmd(self,host,command,*,timeout=None):

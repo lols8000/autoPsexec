@@ -10,6 +10,34 @@ from .base import RunLocal, Transport, Utf8Prefix
 class PsExecTransport(Transport):
     name = "psexec"
 
+    @staticmethod
+    def _clean_transport_noise(text: str, *, success: bool) -> str:
+        """Remove mensagens operacionais do PsExec sem esconder erros reais."""
+        if not text:
+            return ""
+        lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        cleaned: list[str] = []
+        in_clixml = False
+        for raw in lines:
+            line = raw.strip()
+            lower = line.lower()
+            if line.startswith("#< CLIXML"):
+                in_clixml = True
+                continue
+            if in_clixml:
+                # CLIXML em stderr de execução bem-sucedida é ruído de serialização
+                # do Windows PowerShell/PsExec. Em falhas, preservamos o conteúdo.
+                if success:
+                    continue
+                in_clixml = False
+            if success and (
+                lower.startswith("starting ") and " on " in lower
+                or " exited on " in lower and "with error code 0" in lower
+            ):
+                continue
+            cleaned.append(raw)
+        return "\n".join(cleaned).strip()
+
     def __init__(self, runner: RunLocal, utf8_prefix: Utf8Prefix, executable: str | None) -> None:
         self._runner = runner
         self._utf8_prefix = utf8_prefix
@@ -48,6 +76,8 @@ class PsExecTransport(Transport):
             output_encoding=output_encoding,
         )
         result.transport = self.name
+        result.stdout = self._clean_transport_noise(result.stdout, success=result.success)
+        result.stderr = self._clean_transport_noise(result.stderr, success=result.success)
         return result
 
     def test(self, host: str) -> CommandResult:

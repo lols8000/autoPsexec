@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.executor import RemoteExecutor
+from core.transport.psexec import PsExecTransport
 
 
 def test_decode_utf8_preserves_portuguese_accents():
@@ -34,3 +35,30 @@ def test_decoder_does_not_insert_replacement_character():
     decoded = RemoteExecutor._decode_output(raw, preferred="cp850")
     assert "�" not in decoded
     assert decoded == text
+
+
+def test_json_parser_ignores_psexec_noise():
+    noisy = (
+        'Starting powershell.exe on PC01...\n'
+        '[{"DeviceName":"AMD Radeon","IsSigned":true}]\n'
+        '#< CLIXML\n'
+        '<Objs Version="1.1.0.1"></Objs>\n'
+        'powershell.exe exited on PC01 with error code 0.'
+    )
+    data = RemoteExecutor._parse_json_output(noisy)
+    assert data == [{"DeviceName": "AMD Radeon", "IsSigned": True}]
+
+
+def test_psexec_success_noise_is_removed():
+    raw = (
+        "Starting powershell.exe on PC01...\n"
+        "#< CLIXML\n"
+        "<Objs Version=\"1.1.0.1\"></Objs>\n"
+        "powershell.exe exited on PC01 with error code 0."
+    )
+    assert PsExecTransport._clean_transport_noise(raw, success=True) == ""
+
+
+def test_psexec_failure_text_is_preserved():
+    raw = "Access is denied."
+    assert PsExecTransport._clean_transport_noise(raw, success=False) == raw

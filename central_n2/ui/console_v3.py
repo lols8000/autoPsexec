@@ -86,15 +86,106 @@ class ConsoleUIV3:
         return False
 
     @staticmethod
-    def show_result(result: CommandResult) -> None:
+    def _display_value(value: Any) -> str:
+        if value is None or value == "":
+            return "-"
+        if isinstance(value, bool):
+            return "SIM" if value else "NÃO"
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, default=str)
+        return str(value)
+
+    @staticmethod
+    def _clip(text: str, width: int) -> str:
+        if len(text) <= width:
+            return text
+        if width <= 1:
+            return text[:width]
+        return text[: width - 1] + "…"
+
+    @classmethod
+    def _print_table(
+        cls,
+        rows: list[dict[str, Any]],
+        columns: list[tuple[str, str, int]] | None = None,
+    ) -> None:
+        if not rows:
+            print("Nenhum registro encontrado.")
+            return
+
+        if columns is None:
+            keys: list[str] = []
+            for row in rows:
+                for key in row:
+                    if key not in keys:
+                        keys.append(key)
+            keys = keys[:8]
+            columns = []
+            for key in keys:
+                longest = max(
+                    [len(str(key))]
+                    + [len(cls._display_value(row.get(key))) for row in rows[:100]]
+                )
+                columns.append((key, key, max(8, min(longest, 28))))
+
+        header = " | ".join(cls._clip(label, width).ljust(width) for key, label, width in columns)
+        divider = "-+-".join("-" * width for _, _, width in columns)
+        print(header)
+        print(divider)
+        for row in rows:
+            print(
+                " | ".join(
+                    cls._clip(cls._display_value(row.get(key)), width).ljust(width)
+                    for key, _, width in columns
+                )
+            )
+
+    @classmethod
+    def _show_drivers(cls, data: Any) -> None:
+        rows = data if isinstance(data, list) else [data]
+        rows = [row for row in rows if isinstance(row, dict)]
+        columns = [
+            ("DeviceName", "Dispositivo", 36),
+            ("Manufacturer", "Fabricante", 27),
+            ("DriverVersion", "Versão", 18),
+            ("DriverDate", "Data", 10),
+            ("IsSigned", "Assinado", 8),
+            ("InfName", "INF", 14),
+            ("Count", "Qtd.", 4),
+        ]
+        print("\nDRIVERS INSTALADOS")
+        cls._print_table(rows, columns)
+        total = sum(int(row.get("Count") or 1) for row in rows)
+        unsigned = sum(
+            int(row.get("Count") or 1)
+            for row in rows
+            if row.get("IsSigned") is False
+        )
+        print(
+            f"\nResumo: {total} instâncias | {len(rows)} entradas agrupadas | "
+            f"{unsigned} não assinada(s)"
+        )
+
+    @classmethod
+    def show_result(cls, result: CommandResult) -> None:
         status = "✓ SUCESSO" if result.success else "✗ FALHA"
         print(f"\n{status} [{result.transport}] — {result.duration_ms} ms")
         if result.data is not None:
-            print(json.dumps(result.data, indent=2, ensure_ascii=False, default=str))
+            if result.metadata.get("view") == "drivers":
+                cls._show_drivers(result.data)
+            elif (
+                isinstance(result.data, list)
+                and all(isinstance(item, dict) for item in result.data)
+            ):
+                print()
+                cls._print_table(result.data)
+            else:
+                print(json.dumps(result.data, indent=2, ensure_ascii=False, default=str))
         elif result.stdout:
             print(result.stdout)
         if result.stderr:
-            print(f"\nErro: {result.stderr}")
+            label = "Erro" if not result.success else "Aviso"
+            print(f"\n{label}: {result.stderr}")
 
     def execute(self, label: str, func: Callable[[], CommandResult], *, timeout: int | None = None) -> CommandResult | None:
         print(f"\n▶ {label}")
