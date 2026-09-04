@@ -19,10 +19,35 @@ Get-CimInstance Win32_PnPEntity | Where-Object {$_.ConfigManagerErrorCode -ne 0}
     def drivers(self, host: str) -> CommandResult:
         script = r'''
 Get-CimInstance Win32_PnPSignedDriver |
- Select-Object DeviceName,Manufacturer,DriverVersion,DriverDate,IsSigned,InfName |
- Sort-Object DeviceName
+ Where-Object {$_.DeviceName -or $_.InfName -or $_.Manufacturer} |
+ ForEach-Object {
+    [pscustomobject]@{
+        DeviceName    = $_.DeviceName
+        Manufacturer  = $_.Manufacturer
+        DriverVersion = $_.DriverVersion
+        DriverDate    = if ($_.DriverDate) { ([datetime]$_.DriverDate).ToString('yyyy-MM-dd') } else { $null }
+        IsSigned      = $_.IsSigned
+        InfName       = $_.InfName
+    }
+ } |
+ Group-Object DeviceName,Manufacturer,DriverVersion,DriverDate,IsSigned,InfName |
+ ForEach-Object {
+    $item = $_.Group[0]
+    [pscustomobject]@{
+        DeviceName    = $item.DeviceName
+        Manufacturer  = $item.Manufacturer
+        DriverVersion = $item.DriverVersion
+        DriverDate    = $item.DriverDate
+        IsSigned      = $item.IsSigned
+        InfName       = $item.InfName
+        Count         = $_.Count
+    }
+ } |
+ Sort-Object DeviceName,Manufacturer
 '''
-        return self.executor.execute_powershell_json(host, script, timeout=180)
+        result = self.executor.execute_powershell_json(host, script, timeout=180)
+        result.metadata["view"] = "drivers"
+        return result
 
     def usb_devices(self, host: str) -> CommandResult:
         script = r'''
