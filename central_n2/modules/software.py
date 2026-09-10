@@ -86,7 +86,10 @@ $cmd = Get-Command winget.exe -ErrorAction SilentlyContinue
             (
                 f"winget install --id '{winget_id}' --exact --silent "
                 "--accept-package-agreements --accept-source-agreements "
-                "--disable-interactivity"
+                "--disable-interactivity; "
+                "if ($LASTEXITCODE -ne 0) { "
+                "throw \"winget install retornou exit code $LASTEXITCODE\" "
+                "}"
             ),
             timeout=600,
         )
@@ -100,7 +103,10 @@ $cmd = Get-Command winget.exe -ErrorAction SilentlyContinue
             (
                 f"winget upgrade --id '{winget_id}' --exact --silent "
                 "--accept-package-agreements --accept-source-agreements "
-                "--disable-interactivity"
+                "--disable-interactivity; "
+                "if ($LASTEXITCODE -ne 0) { "
+                "throw \"winget upgrade retornou exit code $LASTEXITCODE\" "
+                "}"
             ),
             timeout=600,
         )
@@ -113,7 +119,10 @@ $cmd = Get-Command winget.exe -ErrorAction SilentlyContinue
             host,
             (
                 f"winget uninstall --id '{winget_id}' --exact --silent "
-                "--disable-interactivity"
+                "--disable-interactivity; "
+                "if ($LASTEXITCODE -ne 0) { "
+                "throw \"winget uninstall retornou exit code $LASTEXITCODE\" "
+                "}"
             ),
             timeout=600,
         )
