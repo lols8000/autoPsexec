@@ -27,7 +27,7 @@ class GLPIModule:
             f"'{str(name).replace(chr(39), chr(39) * 2)}'"
             for name in names
         )
-        script = f"""
+        script = fr"""
 $services = Get-Service -ErrorAction SilentlyContinue |
     Where-Object {{ $_.Name -in @({ps_names}) -or $_.DisplayName -match 'GLPI' }}
 $exe = Get-ChildItem 'C:\Program Files\GLPI-Agent' -Filter glpi-agent.exe -Recurse -ErrorAction SilentlyContinue |
@@ -116,7 +116,7 @@ $exe = Get-ChildItem 'C:\Program Files\GLPI-Agent' -Filter glpi-agent.exe -Recur
         return result
 
     def restart_service(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $svc = Get-Service -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match 'glpi' -or $_.DisplayName -match 'GLPI' } |
     Select-Object -First 1
@@ -124,10 +124,10 @@ if (-not $svc) { throw 'Serviço GLPI Agent não encontrado.' }
 Restart-Service -Name $svc.Name -Force -ErrorAction Stop
 Get-Service -Name $svc.Name | Select-Object Name,Status
 """
-        return self.executor.execute_mutating_powershell(host, script)
+        return self.executor.execute_mutating_powershell_json(host, script)
 
     def force_inventory(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $exe = Get-ChildItem 'C:\Program Files\GLPI-Agent' -Filter glpi-agent.exe -Recurse -ErrorAction SilentlyContinue |
     Select-Object -First 1
 if (-not $exe) { throw 'glpi-agent.exe não encontrado.' }
@@ -142,7 +142,7 @@ if ($LASTEXITCODE -ne 0) { throw "GLPI Agent retornou exit code $LASTEXITCODE" }
 
     def recent_log(self, host: str, lines: int = 80) -> CommandResult:
         lines = max(1, min(int(lines), 500))
-        script = f"""
+        script = fr"""
 $paths = @(
     'C:\Program Files\GLPI-Agent\logs\glpi-agent.log',
     'C:\Program Files\GLPI-Agent\var\log\glpi-agent.log'
