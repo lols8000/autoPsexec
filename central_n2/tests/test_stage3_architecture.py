@@ -178,3 +178,63 @@ def test_remediation_uses_specific_validator():
     )
 
     assert result.validation.status is ValidationStatus.PASS
+
+
+
+class _BootstrapExecutor:
+    logger = None
+
+
+def test_v5_bootstrap_accepts_injected_settings_and_has_single_state(tmp_path: Path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    settings_path = config_dir / "settings.json"
+    settings_path.write_text("{}", encoding="utf-8")
+
+    settings = {
+        "runtime": {
+            "max_workers": 1,
+        },
+        "ui": {
+            "heartbeat_seconds": 0.01,
+            "long_operation_timeout_seconds": 30,
+        },
+        "persistence": {
+            "enabled": False,
+        },
+        "compliance": {
+            "profile": "DEFAULT",
+        },
+        "updates": {
+            "repository": "lols8000/autoPsexec",
+        },
+    }
+
+    ui = ConsoleUIV5(
+        _BootstrapExecutor(),
+        settings_path,
+        settings=settings,
+    )
+    try:
+        assert ui.settings is settings
+        assert ui.context.host is None
+        assert ui.context.session is None
+        assert ui.context.health_snapshot is None
+        assert ui.context.diagnoses == []
+        assert ui.context.playbook is None
+        assert ui.context.remediation is None
+        assert ui.context.report_path is None
+
+        legacy_mirrors = {
+            "current_session",
+            "health_snapshot",
+            "last_diagnoses",
+            "last_playbook",
+            "last_remediation",
+            "last_report_path",
+            "correlation_id",
+        }
+        assert legacy_mirrors.isdisjoint(vars(ui))
+    finally:
+        ui.jobs.shutdown()
+        ui.job_manager.shutdown()
