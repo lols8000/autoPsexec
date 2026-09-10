@@ -372,7 +372,6 @@ class ConsoleUIV5(ConsoleBase):
     def _persist_health(self, data: dict[str, Any]) -> None:
         findings = self.engine.evaluate(data, self._baseline())
         diagnoses = self.correlator.correlate(findings)
-        self.context.diagnoses = diagnoses
         self.context.diagnoses = list(diagnoses)
 
         if not self.db:
