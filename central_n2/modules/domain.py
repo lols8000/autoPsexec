@@ -9,7 +9,7 @@ class DomainModule:
         self.executor = executor
 
     def status(self, host: str) -> CommandResult:
-        script = r'''
+        script = """
 $cs = Get-CimInstance Win32_ComputerSystem
 $domain = $cs.Domain
 $dc = $null
@@ -19,21 +19,32 @@ try { $secure = Test-ComputerSecureChannel -ErrorAction Stop } catch {}
 $time = $null
 try { $time = (w32tm /query /status 2>$null | Out-String).Trim() } catch {}
 [pscustomobject]@{
- Domain=$domain
- PartOfDomain=$cs.PartOfDomain
- SecureChannel=$secure
- DomainController=$dc
- TimeStatus=$time
+    Domain = $domain
+    PartOfDomain = $cs.PartOfDomain
+    SecureChannel = $secure
+    DomainController = $dc
+    TimeStatus = $time
 }
-'''
+"""
         return self.executor.execute_powershell_json(host, script, timeout=90)
 
     def gpresult(self, host: str) -> CommandResult:
-        return self.executor.execute_cmd(host, "gpresult /r /scope computer", timeout=120)
+        return self.executor.execute_cmd(
+            host,
+            "gpresult /r /scope computer",
+            timeout=120,
+        )
 
     def gpupdate(self, host: str) -> CommandResult:
-        return self.executor.execute_cmd(host, "gpupdate /force", timeout=300)
+        return self.executor.execute_mutating_cmd(
+            host,
+            "gpupdate /force",
+            timeout=300,
+        )
 
     def repair_secure_channel(self, host: str) -> CommandResult:
-        script = "Test-ComputerSecureChannel -Repair -ErrorAction Stop"
-        return self.executor.execute_remote_powershell_with_fallback(host, script, timeout=120)
+        return self.executor.execute_mutating_powershell(
+            host,
+            "Test-ComputerSecureChannel -Repair -ErrorAction Stop",
+            timeout=120,
+        )
