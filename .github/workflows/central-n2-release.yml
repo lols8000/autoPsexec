@@ -38,7 +38,12 @@ jobs:
       - name: Ruff correctness checks
         run: >-
           python -m ruff check
-          main.py core diagnostics playbooks remediation reports storage
+          main.py
+          core/actions.py core/baselines.py core/config.py
+          core/connectivity.py core/context.py core/evaluation.py
+          core/executor.py core/jobs.py core/logger.py core/result.py
+          core/session.py core/transport core/updater.py core/validation.py
+          diagnostics playbooks remediation reports storage
           integrations/glpi/client.py
           ui/console_base.py ui/console_v5.py ui/tk_app.py
           modules/health.py modules/compliance.py modules/performance.py
