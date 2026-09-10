@@ -1,12 +1,12 @@
 from __future__ import annotations
 import json
-import uuid
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
 from core.baselines import BaselineRepository
 from core.config import ConfigLoader,deep_merge
+from core.context import AttendanceContext
 from core.jobs import JobManager,OperationClass
 from core.result import CommandResult
 from core.session import SessionManager
@@ -29,7 +29,7 @@ class ConsoleUIV5(ConsoleUIV3):
         self.job_manager.set_observer(self.db.save_job if self.db else None)
         self.active_baseline_profile=str(self.settings.get("compliance",{}).get("profile","DEFAULT")).upper()
         self.engine=DiagnosticEngine();self.correlator=CorrelationEngine();self.playbook_runner=PlaybookRunner();self.playbooks=builtin_playbooks();self.remediation_engine=RemediationEngine();self.report_builder=SupportReportBuilder();self.report_exporter=ReportExporter(settings_path.parent.parent/"reports"/"support")
-        cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.update_dir=settings_path.parent.parent/"updates";self.current_session=None;self.correlation_id=uuid.uuid4().hex[:16];self.last_diagnoses=[];self.last_playbook=None;self.last_remediation=None;self.last_report_path=None
+        cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.update_dir=settings_path.parent.parent/"updates";self.current_session=None;self.context=AttendanceContext.start();self.correlation_id=self.context.correlation_id;self.last_diagnoses=[];self.last_playbook=None;self.last_remediation=None;self.last_report_path=None
     def run(self):
         try:
             while True:
@@ -43,10 +43,10 @@ class ConsoleUIV5(ConsoleUIV3):
     def select_host(self):
         self.clear();host=input("Hostname ou IP da estação: ").strip()
         if not host:return
-        self.correlation_id=uuid.uuid4().hex[:16]
+        self.context=AttendanceContext.start(host);self.correlation_id=self.context.correlation_id;self.current_session=None;self.health_snapshot=None;self.last_diagnoses=[];self.last_playbook=None;self.last_remediation=None;self.last_report_path=None
         try:s=self.jobs.run("Abrindo sessão lógica",self._trace(lambda:self.sessions.open(host,refresh=True),action="preflight"),timeout=180)
         except Exception as exc:print(f"\n✗ Falha no preflight: {exc}");self.pause();return
-        self.host=host;self.current_session=s;print(f"\n✓ Transporte selecionado: {s.transport}");print(f"Local: {'SIM' if s.connectivity.get('is_local') else 'NÃO'} | DNS: {s.connectivity.get('dns')} | WinRM: {s.connectivity.get('winrm')} | ADMIN$: {s.connectivity.get('admin_share')}");print(f"Diagnóstico: {s.connectivity.get('diagnosis')}")
+        self.host=host;self.current_session=s;self.context.session=s;print(f"\n✓ Transporte selecionado: {s.transport}");print(f"Local: {'SIM' if s.connectivity.get('is_local') else 'NÃO'} | DNS: {s.connectivity.get('dns')} | WinRM: {s.connectivity.get('winrm')} | ADMIN$: {s.connectivity.get('admin_share')}");print(f"Diagnóstico: {s.connectivity.get('diagnosis')}")
         r=self.execute("Snapshot inicial de saúde",lambda:self.health.snapshot(host),timeout=120)
         if r and r.success and isinstance(r.data,dict):self.health_snapshot=r.data;self.show_health(r.data);self._persist_health(r.data)
         self.pause()
@@ -239,7 +239,7 @@ class ConsoleUIV5(ConsoleUIV3):
         if self.last_remediation:
             actions.append(f"Remediação: {self.last_remediation.spec.title} — {'sucesso' if self.last_remediation.command_result.success else 'falha'}")
         validation=self.last_remediation.after if self.last_remediation and self.last_remediation.after is not None else self.health_snapshot
-        report=self.report_builder.build(host=self.host,user=(self.health_snapshot or {}).get("User"),problem=problem,diagnosis=diag,actions=actions,validation=validation,result="Diagnóstico/atendimento registrado");report["correlation_id"]=self.correlation_id;stamp=datetime.now().strftime("%Y%m%d_%H%M%S");path=self.report_exporter.export(report,fmt="markdown",stem=f"{self.host}_{stamp}");self.report_exporter.export(report,fmt="json",stem=f"{self.host}_{stamp}");self.last_report_path=path
+        report=self.report_builder.build(host=self.host,user=(self.health_snapshot or {}).get("User"),problem=problem,diagnosis=diag,actions=actions,validation=validation,result="Diagnóstico/atendimento registrado");report["correlation_id"]=self.correlation_id;stamp=datetime.now().strftime("%Y%m%d_%H%M%S");path=self.report_exporter.export(report,fmt="markdown",stem=f"{self.host}_{stamp}");self.report_exporter.export(report,fmt="json",stem=f"{self.host}_{stamp}");self.last_report_path=path;self.context.report_path=path
         if self.db:self.db.save_report(self.host,"markdown",path.read_text(encoding="utf-8"),path=str(path))
         print(f"✓ Relatório: {path}");self.pause()
     def menu_jobs(self):
@@ -298,7 +298,7 @@ class ConsoleUIV5(ConsoleUIV3):
         if not cfg.get("enabled"):print("GLPI API desabilitada. Configure somente em settings.local.json.");self.pause();return
         ticket=input("ID do chamado GLPI: ").strip()
         if not ticket.isdigit():return
-        if not self.last_report_path or not Path(self.last_report_path).exists():print("Gere um relatório antes de enviar ao GLPI.");self.pause();return
+        if not self.context.belongs_to(self.host) or not self.last_report_path or self.context.report_path != self.last_report_path or not Path(self.last_report_path).exists():print("Gere um relatório para a estação selecionada antes de enviar ao GLPI.");self.pause();return
         client=GLPIClient(cfg.get("base_url",""),cfg.get("app_token",""),cfg.get("user_token",""))
         try:
             client.add_ticket_followup(int(ticket),Path(self.last_report_path).read_text(encoding="utf-8"))
