@@ -45,7 +45,7 @@ Get-Printer -ErrorAction SilentlyContinue | ForEach-Object {
         )
 
     def restart_spooler(self, host: str) -> CommandResult:
-        return self.executor.execute_mutating_powershell(
+        return self.executor.execute_mutating_powershell_json(
             host,
             (
                 "Restart-Service Spooler -Force -ErrorAction Stop; "
