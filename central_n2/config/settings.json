@@ -58,5 +58,9 @@
   "ui": {
     "heartbeat_seconds": 0.2,
     "long_operation_timeout_seconds": 3600
+  },
+  "logging": {
+    "verbose_payloads": false,
+    "max_error_chars": 4000
   }
 }
