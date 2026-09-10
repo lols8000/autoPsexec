@@ -9,7 +9,7 @@ class DiskModule:
         self.executor = executor
 
     def usage(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
 if (-not $disk -or -not $disk.Size) {
     throw 'Não foi possível consultar o volume C:.'
@@ -27,7 +27,7 @@ if (-not $disk -or -not $disk.Size) {
         return self.usage(host)
 
     def top_user_profiles(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 Get-CimInstance Win32_UserProfile |
     Where-Object { -not $_.Special -and $_.LocalPath } |
     ForEach-Object {
@@ -60,7 +60,7 @@ Get-CimInstance Win32_UserProfile |
         return self.top_user_profiles(host)
 
     def cleanup_estimate(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $targets = @(
     [pscustomobject]@{Name='UserTemp';Path=$env:TEMP},
     [pscustomobject]@{Name='WindowsTemp';Path="$env:SystemRoot\Temp"}
@@ -93,7 +93,7 @@ foreach ($target in $targets) {
         return self.executor.execute_powershell_json(host, script, timeout=180)
 
     def cleanup_safe(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $targets = @($env:TEMP, "$env:SystemRoot\Temp")
 $before = 0
 $after = 0
