@@ -1,443 +1,252 @@
-# Desenvolvimento — Central N2 Workstation v3
+# Desenvolvimento — Central N2 Workstation 5.1.0
 
-## 1. Objetivo
+## Objetivo
 
-Este guia define práticas para evolução da Central N2 sem degradar arquitetura, segurança ou experiência operacional.
+Evoluir a Central sem degradar segurança, previsibilidade operacional ou manutenibilidade.
 
----
-
-## 2. Ambiente de desenvolvimento
-
-Requisitos:
+## Ambiente
 
 - Windows;
 - Python 3.10+;
 - Git;
-- pytest para desenvolvimento;
-- opcionalmente PsExec/Sysinternals para testes manuais controlados.
+- dependências de desenvolvimento fixadas em \`requirements-dev.txt\`.
 
-Instalação de dependência de teste:
-
-```powershell
+\`\`\`powershell
 cd central_n2
-python -m pip install pytest
-```
+python -m pip install -r requirements-dev.txt
+\`\`\`
 
-O runtime de produção utiliza biblioteca padrão do Python.
+## Estrutura
 
----
-
-## 3. Estrutura
-
-```text
+\`\`\`text
 central_n2/
 ├── main.py
 ├── config/
 ├── core/
+│   ├── actions.py
+│   ├── context.py
+│   ├── evaluation.py
 │   ├── executor.py
 │   ├── jobs.py
 │   ├── logger.py
-│   └── result.py
+│   └── transport/
+├── diagnostics/
 ├── modules/
+├── playbooks/
+├── remediation/
+├── reports/
+├── storage/
 ├── ui/
-│   ├── console.py
-│   └── console_v3.py
+│   ├── console_base.py
+│   ├── console_v5.py
+│   └── tk_app.py
 ├── tests/
 └── docs/
-```
+\`\`\`
 
----
+\`console_v3.py\` é histórico/compatibilidade. A UI operacional 5.1 não deve voltar a herdar essa classe.
 
-## 4. Regra de dependência
+## Dependência
 
-Dependência deve fluir:
-
-```text
+\`\`\`text
 UI
  ↓
-Módulos
+orquestração/core
  ↓
-Core / Executor
-```
+módulos
+ ↓
+RemoteExecutor
+ ↓
+transportes
+\`\`\`
 
-Evite:
+Não permita:
 
-```text
-Core importando UI
-Módulo chamando input()
-Executor contendo regra de impressora/GLPI/etc.
-```
+- transporte importando UI;
+- módulo chamando \`input()\`;
+- regra de negócio específica dentro do executor;
+- componente relendo configuração sem necessidade;
+- mutação usando API de leitura apenas para obter fallback conveniente.
 
----
+## Configuração
 
-## 5. Como criar um novo módulo
+\`ConfigLoader\` é chamado no bootstrap. A configuração efetiva é injetada nos componentes principais.
 
-Exemplo:
+Novo componente deve receber dependência/configuração pronta quando possível.
 
-```python
-from core.executor import RemoteExecutor
-from core.result import CommandResult
+## Estado
 
+Todo estado de um atendimento pertence a \`AttendanceContext\`.
 
-class ExampleModule:
-    def __init__(self, executor: RemoteExecutor) -> None:
-        self.executor = executor
+Não crie aliases como:
 
-    def status(self, host: str) -> CommandResult:
-        script = r'''
-[pscustomobject]@{
-    Example = $true
-}
-'''
-        return self.executor.execute_powershell_json(host, script)
-```
+\`\`\`python
+self.last_report = self.context.report_path
+\`\`\`
 
-### Regras
+Use diretamente o contexto.
 
-- receber `RemoteExecutor` por injeção;
-- não instanciar executor internamente;
-- retornar `CommandResult`;
-- preferir JSON estruturado;
-- definir timeout quando operação puder ser longa;
-- não fazer `input()`/`print()` no módulo;
-- escapar entradas interpoladas em PowerShell;
-- documentar impacto.
+## ActionSpec
 
----
+Operações de UI devem ser descritas por \`ActionSpec\` quando aplicável:
 
-## 6. Interface responsiva
+- chave estável;
+- título;
+- \`OperationClass\`;
+- timeout;
+- confirmação.
 
-Operações potencialmente bloqueantes devem passar pelo método `execute()` da UI v3, que utiliza `ResponsiveJobRunner`.
+Nunca derive semântica de segurança a partir do texto exibido ao operador.
 
-Padrão:
+## OperationClass
 
-```python
-self.execute(
-    "Descrição amigável",
-    lambda: self.module.operation(self.host),
-    timeout=180,
-)
-```
+- READ_ONLY;
+- HEAVY_READ;
+- LIGHT_WRITE;
+- HEAVY_WRITE;
+- DISRUPTIVE.
 
-Evite:
+O JobManager serializa qualquer classe diferente de READ_ONLY por host.
 
-```python
-result = self.module.operation(self.host)
-```
+## CommandResult
 
-quando a operação pode levar tempo perceptível, pois isso congela feedback visual.
+Módulos retornam \`CommandResult\`.
 
----
+Dados estruturados vão em \`data\`; texto nativo relevante pode ficar em \`stdout\`.
 
-## 7. Threads
+Não retorne tuplas ad-hoc.
 
-O runner possui pool limitado a quatro workers.
+## Fallback
 
-### Quando usar
+### Leitura
 
-- WinRM;
-- PsExec;
-- chamadas de rede;
-- PowerShell remoto;
-- leitura longa de eventos;
-- inventários;
-- DISM/SFC.
+Pode usar \`execute_powershell\`, \`execute_powershell_json\` ou \`execute_cmd\` com fallback de leitura.
 
-### Quando não usar automaticamente
+### Mutação
 
-- cálculo Python trivial;
-- formatação;
-- validação local simples;
-- múltiplas remediações concorrentes na mesma estação;
-- operações destrutivas em massa.
+Use:
 
-### Regra
+- \`execute_mutating_powershell\`;
+- \`execute_mutating_powershell_json\`;
+- \`execute_mutating_cmd\`.
 
-Concorrência deve resolver um gargalo mensurável, não ser adicionada por estética técnica.
+Esses caminhos impedem dupla execução quando a entrega ao host é incerta.
 
----
+## Resultado indeterminado
 
-## 8. Timeouts
+Ao adicionar mutação, trate \`CommandResult.indeterminate\`.
 
-Toda operação remota deve possuir timeout previsível.
+Não converta resultado indeterminado em sucesso só porque uma chamada local terminou sem exceção.
 
-Categorias sugeridas:
+## PowerShell
 
-```text
-consulta simples      30–90 s
-inventário pesado     120–300 s
-instalação/software   300–900 s
-SFC/DISM              até 3600 s
-```
+Preferir objetos estruturados e \`ConvertTo-Json\`.
 
-Esses valores são referência, não contrato fixo.
+Evitar parsing textual quando existe cmdlet estruturado.
 
-### Timeout remoto vs local
+Entradas interpoladas devem usar validadores/quoting centralizados.
 
-O timeout da UI controla espera local. O executor/subprocess também precisa de timeout adequado para impedir worker permanentemente preso.
+Para programas externos, verifique \`$LASTEXITCODE\` quando o exit code fizer parte do contrato.
 
-Quando implementar nova operação longa, verifique os dois níveis.
+## Remediação
 
----
+Remediação deve separar:
 
-## 9. `CommandResult`
+1. probe anterior;
+2. ação;
+3. probe posterior;
+4. validador;
+5. persistência.
 
-Use o contrato central para manter UI e logging consistentes.
+Validador deve devolver PASS, FAIL ou UNKNOWN.
 
-Não retorne tuplas ad-hoc como:
+UNKNOWN é obrigatório quando o estado final não pode ser provado.
 
-```python
-(True, "ok")
-```
+## Avaliação
 
-Prefira:
+Use \`core/evaluation.py\` para compliance/health compartilhado.
 
-```python
-CommandResult(...)
-```
+Semântica:
 
-ou métodos do executor que já produzem o resultado.
+- PASS: evidência confirma conformidade;
+- FAIL: evidência confirma desvio;
+- UNKNOWN: métrica ausente;
+- NOT_APPLICABLE: controle desabilitado/não exigido.
 
-### `data`
+Não use \`bool(None)\` para transformar métrica ausente em falha.
 
-Use `data` para objetos estruturados.
+## Banco
 
-### `stdout`
+Mudança de schema exige nova migration e incremento de \`SCHEMA_VERSION\`.
 
-Use quando a ferramenta nativa só retorna texto ou quando o texto é relevante integralmente.
+Não altere estrutura existente “in place” sem migration.
 
-### `stderr`
+Adicione teste que cria banco antigo/novo quando a mudança afetar compatibilidade.
 
-Preserve erro suficiente para diagnóstico, evitando segredos.
+## Logging
 
----
+Logs devem ser compactos por padrão. Não persista comandos/payloads completos sem necessidade.
 
-## 10. PowerShell remoto
+Qualquer novo campo potencialmente sensível deve passar pelo mecanismo de redaction.
 
-### Preferir
+## Testes locais
 
-```powershell
-Get-CimInstance
-Get-Service
-Get-Printer
-Get-NetAdapter
-Get-PhysicalDisk
-```
-
-quando fornecem objetos estruturados.
-
-### Evitar parsing frágil
-
-Não basear lógica crítica em posição fixa de texto quando existe cmdlet estruturado.
-
-### Compatibilidade
-
-Antes de adicionar cmdlet:
-
-- considerar Windows 10/11;
-- verificar disponibilidade do módulo;
-- prever `try/catch` para recursos opcionais;
-- tratar ausência como `null` quando apropriado.
-
----
-
-## 11. Sanitização de entrada
-
-Entrada usada em PowerShell deve ser escapada.
-
-Padrão mínimo para string single-quoted:
-
-```python
-safe = value.replace("'", "''")
-```
-
-Melhor ainda: limitar formato quando possível.
-
-Exemplo de porta:
-
-```python
-port = int(value)
-```
-
-Não crie execução arbitrária de shell baseada diretamente em texto do operador.
-
----
-
-## 12. Operações destrutivas
-
-Antes de adicionar ação de escrita, responder:
-
-1. ela é necessária para N2?
-2. há uma consulta prévia que confirme a causa?
-3. existe rollback?
-4. usuário pode perder dados?
-5. conectividade pode cair?
-6. precisa de reboot?
-7. deve exigir `SIM`?
-8. pode ser executada em lote?
-9. precisa de log especial?
-
-Se a resposta for incerta, comece em modo consulta/planejamento.
-
----
-
-## 13. Testes
-
-Executar sempre:
-
-```powershell
-python -m compileall .
+\`\`\`powershell
+python -W error::SyntaxWarning -m compileall -q .
 python -m pytest -q
-```
+\`\`\`
 
-### Testes mínimos para novo módulo
+Para reproduzir gates adicionais:
 
-- validação local pura quando existir;
-- geração/escaping de comando;
-- comportamento em entrada inválida;
-- timeout quando aplicável;
-- smoke test de métodos utilizados pela UI.
+\`\`\`powershell
+python -m ruff check .
+python -m mypy --explicit-package-bases core/result.py core/context.py core/actions.py core/evaluation.py core/updater.py core/validation.py remediation/engine.py
+\`\`\`
 
-### Teste remoto
+## CI
 
-Não deve ser obrigatório no CI público.
+O workflow oficial executa:
 
-Integrações reais devem ocorrer em VM/estação de bancada autorizada.
+- Python 3.10/3.12/3.13 em Windows;
+- compile com SyntaxWarning como erro;
+- Ruff;
+- mypy em contratos críticos;
+- pytest;
+- coverage mínimo;
+- PyInstaller;
+- Inno Setup.
 
----
+Não reduza um gate para “fazer o CI passar” quando o gate encontrou defeito real. Corrija o contrato ou justifique explicitamente a exceção.
 
-## 14. CI
+## Checklist de PR
 
-O GitHub Actions compila o Python e executa pytest em Windows.
-
-Um PR não deve ser promovido se:
-
-- `compileall` falhar;
-- pytest falhar;
-- documentação estiver divergente;
-- houver segredo/configuração interna no diff.
-
----
-
-## 15. Checklist de Pull Request
-
-```text
-[ ] branch criada a partir do master atual
-[ ] mudança tem responsabilidade clara
-[ ] sem shell=True desnecessário
-[ ] entradas sanitizadas
+\`\`\`text
+[ ] branch parte do master atual
+[ ] entrada validada
+[ ] operação classificada
+[ ] mutação usa executor mutável
 [ ] timeout definido
-[ ] operação longa usa runner responsivo
-[ ] confirmação em ações de impacto
+[ ] resultado indeterminado tratado
 [ ] CommandResult preservado
-[ ] testes adicionados/atualizados
-[ ] compileall passa
-[ ] pytest passa
+[ ] dados estruturados quando possível
+[ ] logging seguro
+[ ] migration criada se schema mudou
+[ ] testes adicionados
+[ ] matriz/ruff/mypy/coverage verdes
+[ ] build e instalador verdes
 [ ] docs atualizadas
 [ ] nenhum segredo no diff
-[ ] comportamento testado em bancada quando necessário
-```
+\`\`\`
 
----
+## Definition of Done
 
-## 16. Padrão de commits
-
-Sugestão:
-
-```text
-feat: adiciona diagnóstico X
-fix: corrige timeout do runner
-docs: atualiza manual operacional
-test: cobre módulo de impressoras
-refactor: separa lógica de rede
-```
-
-Commits pequenos e semanticamente claros facilitam rollback e revisão.
-
----
-
-## 17. Logging
-
-Novas ações administrativas devem ser compatíveis com auditoria.
-
-Evite imprimir segredo no stdout e depois enviá-lo ao logger.
-
----
-
-## 18. Performance
-
-Antes de otimizar:
-
-1. identificar onde está a espera;
-2. distinguir CPU-bound de I/O-bound;
-3. medir número de round-trips remotos;
-4. agregar consultas em uma execução quando fizer sentido;
-5. limitar concorrência;
-6. evitar coleta excessiva que sobrecarregue estação do usuário.
-
-### Exemplo
-
-Melhor:
-
-```text
-1 chamada PowerShell → CPU + RAM + disco + rede
-```
-
-que:
-
-```text
-20 chamadas WinRM separadas
-```
-
-quando todos os dados podem ser obtidos de forma segura em uma única sessão/comando.
-
----
-
-## 19. Compatibilidade com UI futura
-
-Módulos não devem depender do console atual.
-
-Isso permite futuramente criar:
-
-```text
-Tkinter
-Web UI
-API local
-TUI
-```
-
-reutilizando o mesmo executor e módulos.
-
----
-
-## 20. Dívida técnica conhecida / evolução
-
-Itens recomendados:
-
-- `settings.local.json` com merge seguro;
-- sessões WinRM reutilizáveis quando vantajosas;
-- job IDs e cancelamento cooperativo;
-- correlação automática de sintomas;
-- relatório N2 estruturado;
-- testes de integração em VM Windows;
-- separação de permissões read-only/remediation;
-- remoção futura da UI v2 quando não houver mais necessidade histórica.
-
----
-
-## 21. Definition of Done
-
-Uma funcionalidade não está concluída apenas porque “executa o comando”.
-
-Ela está concluída quando:
-
-```text
+\`\`\`text
 funciona
-+ falha de forma previsível
-+ possui timeout
-+ mantém feedback visual
-+ retorna evidência
-+ respeita segurança
-+ possui testes
-+ está documentada
-```
++ falha previsivelmente
++ não duplica mutação
++ mantém feedback
++ valida o resultado
++ deixa evidência
++ passa CI
++ está documentado
+\`\`\`
