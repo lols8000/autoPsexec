@@ -64,7 +64,6 @@ class ConsoleBase:
         )
 
         self.host: str | None = None
-        self.health_snapshot: dict[str, Any] | None = None
 
         self.diag = DiagnosticsModule(executor)
         self.health = HealthModule(executor)
