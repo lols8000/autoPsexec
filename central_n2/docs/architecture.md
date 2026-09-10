@@ -1,206 +1,239 @@
-# Arquitetura — Central N2 Workstation v5
+# Arquitetura — Central N2 Workstation 5.1.0
 
-## Visão geral
+## Visão
 
-A Central N2 é uma plataforma de troubleshooting de workstations Windows.
-
-~~~text
-UI
- ↓
-JobManager / SessionManager
- ↓
-Módulos
- ↓
+\`\`\`text
+main.py
+  ↓
+ConfigLoader + AuditLogger
+  ↓
 RemoteExecutor
- ↓
-Local / WinRM / PsExec
- ↓
+  ↓
+ConsoleUIV5 / GUI
+  ↓
+JobManager + AttendanceContext + SessionManager
+  ↓
+Módulos / Playbooks / RemediationEngine
+  ↓
+LocalTransport | WinRMTransport | PsExecTransport
+  ↓
 Estação Windows
-~~~
+  ↓
+SQLite / relatório / GLPI
+\`\`\`
 
-Depois da coleta, a v5 pode alimentar diagnóstico, correlação, playbook, remediação, persistência e relatório.
+A regra de dependência é descendente: UI orquestra, módulos encapsulam domínio, executor decide transporte e transportes não conhecem a UI.
 
-## Entry point
+## Bootstrap
 
-central_n2/main.py:
+\`main.py\`:
 
-1. valida Windows;
-2. localiza configuração;
-3. solicita UAC;
-4. carrega settings.json + settings.local.json;
-5. cria AuditLogger;
-6. cria RemoteExecutor;
-7. inicia ConsoleUIV5 ou GUI.
+1. processa argumentos;
+2. valida Windows;
+3. solicita UAC quando necessário;
+4. carrega \`settings.json\` e \`settings.local.json\` uma única vez;
+5. cria \`AuditLogger\`;
+6. cria \`RemoteExecutor\`;
+7. injeta a mesma configuração na interface selecionada.
 
-## Interface
+A configuração efetiva não é relida independentemente pelos componentes principais.
 
-A interface principal é ConsoleUIV5, que herda menus funcionais da geração anterior e acrescenta:
+## Estado do atendimento
 
-- conectividade/capabilities;
-- playbooks;
-- histórico/diff;
-- relatórios;
-- jobs;
-- atualização;
-- GLPI API;
-- remediações guiadas;
-- baseline.
+\`AttendanceContext\` é a fonte única de verdade para:
 
-## Transportes
+- host lógico do atendimento;
+- \`correlation_id\`;
+- sessão;
+- snapshot de saúde;
+- diagnósticos;
+- playbook;
+- remediação;
+- caminho do relatório.
 
-### Local
-
-HostIdentity detecta localhost, hostname/FQDN local e endereços locais. Nesse caso não há WinRM nem PsExec.
-
-### WinRM
-
-Preferido quando o preflight indica disponibilidade.
-
-### PsExec
-
-Fallback quando WinRM não é utilizável e PsExec está disponível.
-
-Dependências típicas:
-
-- TCP 445/SMB;
-- ADMIN$;
-- privilégio administrativo;
-- binário PsExec homologado.
-
-O executor procura PsExec no PATH, System32 e C:\Sysinternals.
-
-## Falha de WinRM não significa host offline
-
-Exemplo:
-
-~~~text
-Ping ........... OK
-TCP 445 ........ OK
-ADMIN$ ......... OK
-TCP 5985 ....... FAIL
-PsExec ......... OK
-
-Resultado: host administrável por PsExec.
-~~~
-
-A camada de conectividade deve separar DNS, ping, WinRM e ADMIN$.
-
-## CommandResult
-
-Todo resultado remoto usa CommandResult com:
-
-- success;
-- command;
-- host;
-- stdout;
-- stderr;
-- return_code;
-- duration_ms;
-- transport;
-- data;
-- metadata.
-
-Dados estruturados devem preferir data em vez de parsing textual pela UI.
-
-## JSON através de PsExec
-
-PowerShell remoto pode ser envelopado por mensagens do PsExec/CLIXML.
-
-RemoteExecutor._parse_json_output procura JSON válido mesmo quando existe ruído antes/depois.
-
-PsExecTransport._clean_transport_noise remove apenas ruído de execução bem-sucedida. Erros reais permanecem.
-
-## Apresentação
-
-ConsoleUIV3 fornece renderização genérica de listas de objetos como tabela. Views específicas podem especializar a apresentação.
-
-A view drivers:
-
-- usa colunas fixas;
-- converte booleano para SIM/NÃO;
-- normaliza data;
-- apresenta quantidade agrupada;
-- mostra resumo.
-
-## Jobs
-
-JobManager usa ThreadPoolExecutor e classifica operações em:
-
-- READ_ONLY;
-- LIGHT_WRITE;
-- HEAVY_WRITE;
-- DISRUPTIVE.
-
-Leituras podem concorrer. Escritas são serializadas por host.
-
-Estados:
-
-~~~text
-QUEUED → RUNNING → SUCCESS / FAILED / TIMEOUT / CANCELLED
-~~~
-
-O estado TIMEOUT não é sobrescrito se o worker terminar depois.
-
-## Retry
-
-RetryPolicy é aplicado a falhas transitórias de transporte/preflight. Access Denied e falhas determinísticas não são repetidas indiscriminadamente.
+Ao selecionar outro host, um novo contexto é criado; dados do atendimento anterior não são reutilizados.
 
 ## Sessão lógica
 
-SessionManager guarda contexto por host:
+\`SessionManager\` não mantém uma \`PSSession\` permanente. Ele guarda:
 
-- transporte;
-- conectividade;
-- capabilities.
+- transporte selecionado;
+- diagnóstico de conectividade;
+- capabilities;
+- estado de prontidão.
 
-Não é PSSession permanente.
+## Preflight
 
-## Diagnóstico
+A conectividade é avaliada em camadas:
 
-DiagnosticEngine transforma evidências em Finding. CorrelationEngine transforma combinações em Diagnosis com confiança e rationale.
+\`\`\`text
+DNS
+ ↓
+ping + TCP 445 + TCP 5985 + TCP 5986
+ ↓
+WinRM autenticado / ADMIN$
+ ↓
+PsExec real
+ ↓
+estado final + transporte
+\`\`\`
 
-## Playbooks
+Estados:
 
-PlaybookRunner executa coletores somente leitura em sequência orientada por sintoma.
+| Estado | Significado |
+| --- | --- |
+| READY_LOCAL | alvo é a própria estação |
+| READY_WINRM | WinRM autenticado e com Invoke-Command validado |
+| READY_PSEXEC | WinRM indisponível e PsExec/ADMIN$ validados |
+| DNS_FAILED | nome não pôde ser resolvido |
+| AUTHENTICATION_FAILED | rede responde, mas autenticação/autorização falhou |
+| NETWORK_UNREACHABLE | nenhum caminho administrativo conhecido respondeu |
+| NO_USABLE_TRANSPORT | host alcançável, porém sem transporte validado |
+
+### WinRM
+
+O teste não se limita a \`Test-WSMan\`. A Central também executa um \`Invoke-Command\` mínimo e verifica um marcador conhecido. Assim, listener disponível não é confundido com sessão autenticada utilizável.
+
+### PsExec
+
+É fallback de primeira classe, não “último hack”. O teste executa comando remoto real. Dependências típicas: TCP 445, ADMIN$, privilégio administrativo e binário homologado.
+
+## Semântica de fallback
+
+O executor classifica a falha WinRM antes de decidir fallback.
+
+### Consulta
+
+\`\`\`text
+READ_ONLY + falha de transporte
+  → pode repetir via PsExec
+\`\`\`
+
+### Mutação
+
+\`\`\`text
+falha pré-execução comprovada
+  → pode repetir via PsExec
+
+falha durante/depois de possível execução
+  → indeterminate=True
+  → fallback_suppressed=True
+  → operador valida estado antes de repetir
+\`\`\`
+
+A regra vale para PowerShell e CMD mutáveis.
+
+## CommandResult
+
+Contrato central:
+
+- \`success\`;
+- \`command\`;
+- \`host\`;
+- \`stdout\`;
+- \`stderr\`;
+- \`return_code\`;
+- \`duration_ms\`;
+- \`transport\`;
+- \`data\`;
+- \`metadata\`.
+
+\`indeterminate\` é derivado de metadata e significa: a ação pode ter atingido o destino, mas a Central não conseguiu confirmar o resultado final.
+
+## Scheduler
+
+Há um \`JobManager\` compartilhado.
+
+Classes:
+
+- \`READ_ONLY\`;
+- \`HEAVY_READ\`;
+- \`LIGHT_WRITE\`;
+- \`HEAVY_WRITE\`;
+- \`DISRUPTIVE\`.
+
+Operações que não são \`READ_ONLY\` são serializadas por host. Estados de job:
+
+\`QUEUED → RUNNING → SUCCESS | FAILED | TIMEOUT | CANCELLED\`.
+
+Timeout local não prova encerramento remoto. Um job marcado TIMEOUT não volta para SUCCESS se o worker terminar depois.
+
+## Avaliação
+
+\`core/evaluation.py\` centraliza os estados:
+
+- \`PASS\`;
+- \`FAIL\`;
+- \`UNKNOWN\`;
+- \`NOT_APPLICABLE\`.
+
+UNKNOWN representa ausência de evidência. N/A representa controle não exigido. Apenas PASS/FAIL entram no denominador do compliance.
+
+## Diagnóstico e playbooks
+
+\`DiagnosticEngine\` produz fatos (\`Finding\`). \`CorrelationEngine\` produz diagnósticos (\`Diagnosis\`) com rationale e confiança.
+
+Playbooks executam coletores orientados por sintoma; não são remediações automáticas.
 
 ## Remediação
 
-RemediationEngine:
+\`RemediationEngine\` separa:
 
-~~~text
-before → ação → after → diff
-~~~
+\`\`\`text
+before probe
+  ↓
+ação
+  ↓
+after probe
+  ↓
+validador específico
+  ↓
+PASS / FAIL / UNKNOWN
+\`\`\`
+
+Se a execução for indeterminada, o validador deve preferir UNKNOWN quando não houver evidência suficiente.
 
 ## Persistência
 
-SQLite usa WAL e persiste snapshots, jobs, findings, remediações e relatórios.
+SQLite:
+
+- WAL;
+- \`PRAGMA foreign_keys=ON\`;
+- \`busy_timeout\`;
+- migrations sequenciais;
+- \`PRAGMA user_version\`;
+- \`quick_check\` na inicialização;
+- retenção configurável.
+
+Schema atual: **2**.
+
+Tabelas operacionais: \`hosts\`, \`snapshots\`, \`jobs\`, \`findings\`, \`remediations\`, \`reports\`.
 
 ## Auditoria
 
-AuditLogger suporta correlation_id e sanitização de segredos.
-
-## Configuração
-
-ConfigLoader faz merge recursivo:
-
-~~~text
-settings.json
-    +
-settings.local.json
-    ↓
-configuração efetiva
-~~~
+\`AuditLogger\` é thread-safe. Por padrão grava metadados compactos; payloads verbosos são opt-in. Redaction cobre senha, token, API key, Authorization, Bearer e credenciais.
 
 ## Distribuição
 
-PyInstaller gera onedir. Inno Setup gera instalador. O CI Windows valida compileall, pytest, build portátil e instalador.
+- PyInstaller onedir;
+- UPX desativado;
+- metadata de versão Windows;
+- Inno Setup;
+- release com SHA256SUMS;
+- assinatura Authenticode opcional quando o CI recebe certificado.
 
-## Regra arquitetural
+## Regra de evolução
 
-Dependência deve apontar para baixo:
+Nova funcionalidade deve respeitar:
 
-~~~text
-UI → orquestração → módulos → executor → transporte
-~~~
-
-O transporte não deve conhecer a UI.
+\`\`\`text
+entrada validada
++ ActionSpec
++ operação classificada
++ timeout
++ CommandResult
++ resultado estruturado quando possível
++ logging seguro
++ teste
++ documentação
+\`\`\`
