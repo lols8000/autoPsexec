@@ -432,7 +432,8 @@ class ConsoleUIV5(ConsoleBase):
                 f"estado {compliance['overall_state']} | "
                 f"PASS {compliance['compliant']} | "
                 f"FAIL {compliance['failed']} | "
-                f"UNKNOWN {compliance['unknown']}"
+                f"UNKNOWN {compliance['unknown']} | "
+                f"N/A {compliance['not_applicable']}"
             )
 
             symbols = {
