@@ -295,10 +295,15 @@ class ConsoleBase:
         )
         print(f"\n▶ {spec.title}")
 
+        runner = func
+        trace = getattr(self, "_trace", None)
+        if callable(trace):
+            runner = trace(func, action=spec.key)
+
         try:
             result = self.jobs.run(
                 spec.title,
-                func,
+                runner,
                 timeout=effective_timeout,
                 operation_class=spec.operation_class,
                 host=self.host or "local-ui",
