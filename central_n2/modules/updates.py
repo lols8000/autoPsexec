@@ -9,7 +9,7 @@ class UpdatesModule:
         self.executor = executor
 
     def status(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $history = Get-HotFix -ErrorAction SilentlyContinue |
     Sort-Object InstalledOn -Descending |
     Select-Object -First 20 HotFixID,Description,InstalledOn,InstalledBy
@@ -45,7 +45,7 @@ try {
         return self.executor.execute_powershell_json(host, script, timeout=180)
 
     def trigger_scan(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $uso = Join-Path $env:SystemRoot 'System32\UsoClient.exe'
 if (-not (Test-Path $uso)) { throw 'UsoClient.exe não encontrado.' }
 Start-Process $uso -ArgumentList 'StartScan' -WindowStyle Hidden
@@ -58,7 +58,7 @@ Start-Process $uso -ArgumentList 'StartScan' -WindowStyle Hidden
         )
 
     def reset_components(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $serviceNames = @('bits','wuauserv','cryptsvc')
 $original = @{}
 $renamed = @()
