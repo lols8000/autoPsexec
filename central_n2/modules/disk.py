@@ -120,7 +120,7 @@ foreach ($path in $targets) {
     RecycleBinTouched = $false
 }
 """
-        return self.executor.execute_mutating_powershell(
+        return self.executor.execute_mutating_powershell_json(
             host,
             script,
             timeout=180,
