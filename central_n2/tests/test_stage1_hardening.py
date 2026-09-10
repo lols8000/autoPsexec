@@ -163,7 +163,7 @@ class _UpdateExecutor:
     def __init__(self):
         self.script = ""
 
-    def execute_mutating_powershell(self, host, script, timeout=None):
+    def execute_mutating_powershell_json(self, host, script, timeout=None):
         self.script = script
         return CommandResult(True, "update-reset", host, transport="local")
 
