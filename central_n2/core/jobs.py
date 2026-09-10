@@ -26,6 +26,7 @@ class JobState(str, Enum):
 
 class OperationClass(str, Enum):
     READ_ONLY = "READ_ONLY"
+    HEAVY_READ = "HEAVY_READ"
     LIGHT_WRITE = "LIGHT_WRITE"
     HEAVY_WRITE = "HEAVY_WRITE"
     DISRUPTIVE = "DISRUPTIVE"
@@ -46,14 +47,16 @@ class JobRecord:
     label: str
     operation_class: OperationClass
     correlation_id: str | None = None
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     state: JobState = JobState.QUEUED
     elapsed_seconds: float = 0.0
     error: str | None = None
 
 
 class HostLockRegistry:
-    """Serializa operações mutáveis por host sem bloquear leituras."""
+    """Serializa operações custosas/mutáveis por host sem bloquear leituras leves."""
 
     def __init__(self) -> None:
         self._guard = threading.Lock()
@@ -61,11 +64,15 @@ class HostLockRegistry:
 
     def _lock_for(self, host: str) -> threading.Lock:
         with self._guard:
-            return self._locks.setdefault(host.lower(), threading.Lock())
+            return self._locks.setdefault(host.casefold(), threading.Lock())
 
     @contextmanager
-    def hold(self, host: str, operation_class: OperationClass):
-        if operation_class == OperationClass.READ_ONLY:
+    def hold(
+        self,
+        host: str,
+        operation_class: OperationClass,
+    ):
+        if operation_class is OperationClass.READ_ONLY:
             yield
             return
 
@@ -78,7 +85,7 @@ class HostLockRegistry:
 
 
 class JobManager:
-    """Scheduler concorrente com heartbeat e serialização de mutações por estação."""
+    """Scheduler único com heartbeat e serialização por estação."""
 
     def __init__(
         self,
@@ -86,8 +93,10 @@ class JobManager:
         max_workers: int = 6,
         heartbeat_seconds: float = 0.2,
         observer: Callable[[JobRecord], None] | None = None,
+        max_records: int = 1000,
     ) -> None:
         self.heartbeat_seconds = max(0.05, float(heartbeat_seconds))
+        self.max_records = max(100, int(max_records))
         self._pool = ThreadPoolExecutor(
             max_workers=max(1, int(max_workers)),
             thread_name_prefix="central-n2",
@@ -97,7 +106,10 @@ class JobManager:
         self._guard = threading.Lock()
         self._observer = observer
 
-    def set_observer(self, observer: Callable[[JobRecord], None] | None) -> None:
+    def set_observer(
+        self,
+        observer: Callable[[JobRecord], None] | None,
+    ) -> None:
         self._observer = observer
 
     def _notify(self, record: JobRecord) -> None:
@@ -106,8 +118,17 @@ class JobManager:
         try:
             self._observer(record)
         except Exception:
-            # Falha de telemetria/persistência nunca deve derrubar a operação N2.
+            # Telemetria/persistência não pode derrubar o atendimento.
             pass
+
+    def _remember(self, record: JobRecord) -> None:
+        with self._guard:
+            self._records[record.job_id] = record
+            overflow = len(self._records) - self.max_records
+            if overflow > 0:
+                oldest = list(self._records)[:overflow]
+                for job_id in oldest:
+                    self._records.pop(job_id, None)
 
     def submit(
         self,
@@ -125,8 +146,7 @@ class JobManager:
             operation_class=operation_class,
             correlation_id=correlation_id,
         )
-        with self._guard:
-            self._records[record.job_id] = record
+        self._remember(record)
         self._notify(record)
 
         def wrapped() -> T:
@@ -136,11 +156,17 @@ class JobManager:
             try:
                 with self._locks.hold(host, operation_class):
                     value = func()
-                if record.state not in {JobState.TIMEOUT, JobState.CANCELLED}:
+                if record.state not in {
+                    JobState.TIMEOUT,
+                    JobState.CANCELLED,
+                }:
                     record.state = JobState.SUCCESS
                 return value
             except Exception as exc:
-                if record.state not in {JobState.TIMEOUT, JobState.CANCELLED}:
+                if record.state not in {
+                    JobState.TIMEOUT,
+                    JobState.CANCELLED,
+                }:
                     record.state = JobState.FAILED
                     record.error = f"{type(exc).__name__}: {exc}"
                 raise
@@ -183,7 +209,9 @@ class JobManager:
                 self._clear_status_line()
                 if on_tick:
                     on_tick(JobStatus(label, elapsed, False, True))
-                raise TimeoutError(f"Operação '{label}' excedeu {timeout:.0f}s")
+                raise TimeoutError(
+                    f"Operação '{label}' excedeu {timeout:.0f}s"
+                )
 
             wait_for = (
                 self.heartbeat_seconds
@@ -205,7 +233,9 @@ class JobManager:
                 if on_tick:
                     on_tick(JobStatus(label, elapsed, False, False))
                 else:
-                    sys.stdout.write(f"\r{next(spinner)} {label}... {elapsed:5.1f}s")
+                    sys.stdout.write(
+                        f"\r{next(spinner)} {label}... {elapsed:5.1f}s"
+                    )
                     sys.stdout.flush()
 
     def list_records(self) -> list[JobRecord]:
@@ -222,13 +252,19 @@ class JobManager:
 
 
 class ResponsiveJobRunner:
-    """Compatibilidade da UI v3 sobre o scheduler atual."""
+    """Adaptador de compatibilidade sobre o JobManager compartilhado."""
 
-    def __init__(self, *, heartbeat_seconds: float = 0.2) -> None:
-        self._manager = JobManager(
+    def __init__(
+        self,
+        *,
+        heartbeat_seconds: float = 0.2,
+        manager: JobManager | None = None,
+    ) -> None:
+        self._manager = manager or JobManager(
             max_workers=4,
             heartbeat_seconds=heartbeat_seconds,
         )
+        self._owns_manager = manager is None
 
     @property
     def heartbeat_seconds(self) -> float:
@@ -241,15 +277,20 @@ class ResponsiveJobRunner:
         *,
         timeout: float | None = None,
         on_tick: Callable[[JobStatus], None] | None = None,
+        operation_class: OperationClass = OperationClass.READ_ONLY,
+        host: str = "local-ui",
+        correlation_id: str | None = None,
     ) -> T:
         return self._manager.run_sync(
-            "local-ui",
+            host,
             label,
             func,
-            operation_class=OperationClass.READ_ONLY,
+            operation_class=operation_class,
             timeout=timeout,
             on_tick=on_tick,
+            correlation_id=correlation_id,
         )
 
     def shutdown(self) -> None:
-        self._manager.shutdown()
+        if self._owns_manager:
+            self._manager.shutdown()
