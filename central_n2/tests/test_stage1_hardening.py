@@ -195,3 +195,24 @@ def test_validation_rejects_invalid_port_and_sid():
         pass
     else:
         raise AssertionError("SID inválido deveria falhar")
+
+
+def test_winrm_probe_validates_invoke_command():
+    captured = {}
+
+    def runner(cmd, *, host, action, timeout=None, output_encoding=None):
+        captured["command"] = " ".join(cmd)
+        captured["action"] = action
+        return CommandResult(
+            True,
+            "probe",
+            host,
+            stdout="CENTRAL_N2_WINRM_OK",
+        )
+
+    result = WinRMTransport(runner, lambda: "").test("PC01")
+
+    assert result.success is True
+    assert captured["action"] == "test_winrm"
+    assert "Invoke-Command" in captured["command"]
+    assert "Test-WSMan" in captured["command"]
