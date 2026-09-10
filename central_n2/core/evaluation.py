@@ -191,8 +191,8 @@ def evaluate_snapshot(
             )
         )
 
+    pending = snapshot.get("PendingReboot")
     if policy.pending_reboot_not_allowed:
-        pending = snapshot.get("PendingReboot")
         if pending is None:
             checks.append(
                 _unknown(
@@ -220,6 +220,18 @@ def evaluate_snapshot(
                     8 if failed else 0,
                 )
             )
+    else:
+        checks.append(
+            CheckResult(
+                "pending_reboot",
+                "Reinicialização pendente",
+                EvaluationState.NOT_APPLICABLE,
+                "info",
+                pending,
+                "não exigido",
+                "Controle não exigido pelo baseline.",
+            )
+        )
 
     stopped = integer(snapshot.get("StoppedAutoServices"))
     if stopped is None:
@@ -254,9 +266,20 @@ def evaluate_snapshot(
         ("secure_boot", "Secure Boot", "SecureBoot", policy.secure_boot_required, "high", 12),
     )
     for key, label, source, required, severity, penalty in requirements:
-        if not required:
-            continue
         actual = snapshot.get(source)
+        if not required:
+            checks.append(
+                CheckResult(
+                    key,
+                    label,
+                    EvaluationState.NOT_APPLICABLE,
+                    "info",
+                    actual,
+                    "não exigido",
+                    "Controle não exigido pelo baseline.",
+                )
+            )
+            continue
         if actual is None:
             checks.append(_unknown(key, label, severity, True))
             continue
@@ -293,6 +316,10 @@ def score_checks(checks: list[CheckResult]) -> dict[str, Any]:
     passed = sum(check.state is EvaluationState.PASS for check in checks)
     failed = sum(check.state is EvaluationState.FAIL for check in checks)
     unknown = sum(check.state is EvaluationState.UNKNOWN for check in checks)
+    not_applicable = sum(
+        check.state is EvaluationState.NOT_APPLICABLE
+        for check in checks
+    )
     applicable = passed + failed
     compliance_score = (
         round((passed / applicable) * 100) if applicable else None
@@ -303,6 +330,8 @@ def score_checks(checks: list[CheckResult]) -> dict[str, Any]:
         else EvaluationState.UNKNOWN.value
         if unknown
         else EvaluationState.PASS.value
+        if passed
+        else EvaluationState.NOT_APPLICABLE.value
     )
     return {
         "health_score": score,
@@ -310,6 +339,7 @@ def score_checks(checks: list[CheckResult]) -> dict[str, Any]:
         "passed": passed,
         "failed": failed,
         "unknown": unknown,
+        "not_applicable": not_applicable,
         "applicable": applicable,
         "overall_state": overall,
     }
