@@ -133,7 +133,7 @@ if ($operationError) {
     )
 }
 """
-        result = self.executor.execute_mutating_powershell(
+        result = self.executor.execute_mutating_powershell_json(
             host,
             script,
             timeout=180,
