@@ -26,6 +26,7 @@ def evaluate_compliance(
         "compliant": summary["passed"],
         "failed": summary["failed"],
         "unknown": summary["unknown"],
+        "not_applicable": summary["not_applicable"],
         "total": len(checks),
         "overall_state": summary["overall_state"],
         "items": items,
