@@ -186,3 +186,42 @@ def test_glpi_playbook_understands_module_status_shape():
     )
     findings = PlaybookAnalyzer().analyze(execution)
     assert [item.id for item in findings] == ["GLPI_STOPPED"]
+
+
+
+def test_optional_controls_are_explicitly_not_applicable():
+    report = evaluate_compliance(
+        {
+            "DiskFreePercent": 50,
+            "UptimeDays": 1,
+            "PendingReboot": False,
+            "StoppedAutoServices": 0,
+            "DefenderEnabled": True,
+            "FirewallEnabled": True,
+            "GlpiRunning": True,
+            "BitLockerProtected": False,
+            "TPMReady": False,
+            "SecureBoot": False,
+        },
+        {
+            "defender_required": True,
+            "firewall_required": True,
+            "glpi_required": True,
+            "pending_reboot_not_allowed": False,
+            "bitlocker_required": False,
+            "tpm_required": False,
+            "secure_boot_required": False,
+        },
+    )
+
+    states = {
+        item["key"]: item["state"]
+        for item in report["items"]
+    }
+
+    assert states["pending_reboot"] == EvaluationState.NOT_APPLICABLE.value
+    assert states["bitlocker"] == EvaluationState.NOT_APPLICABLE.value
+    assert states["tpm"] == EvaluationState.NOT_APPLICABLE.value
+    assert states["secure_boot"] == EvaluationState.NOT_APPLICABLE.value
+    assert report["not_applicable"] == 4
+    assert report["failed"] == 0
