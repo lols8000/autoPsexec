@@ -126,6 +126,9 @@ class ConsoleUIV5(ConsoleBase):
         self.report_exporter = ReportExporter(root / "reports" / "support")
 
         update_config = settings.get("updates", {})
+        self.updates_enabled = bool(
+            update_config.get("enabled", True)
+        )
         self.updater = UpdateManager(
             update_config.get("repository", "lols8000/autoPsexec"),
             __version__,
@@ -1044,6 +1047,11 @@ class ConsoleUIV5(ConsoleBase):
     def menu_update(self) -> None:
         self.clear()
         print(f"Versão atual: {__version__}")
+
+        if not self.updates_enabled:
+            print("Atualizações estão desabilitadas pela configuração.")
+            self.pause()
+            return
 
         try:
             info = self.jobs.run(
