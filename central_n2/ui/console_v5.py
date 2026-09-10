@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 from core.baselines import BaselineRepository
-from core.config import ConfigLoader,deep_merge
+from core.config import ConfigLoader
 from core.context import AttendanceContext
 from core.jobs import JobManager,OperationClass
 from core.result import CommandResult
@@ -52,18 +52,10 @@ class ConsoleUIV5(ConsoleUIV3):
         if r and r.success and isinstance(r.data,dict):self.health_snapshot=r.data;self.show_health(r.data);self._persist_health(r.data)
         self.pause()
     def _baseline(self):
-        cfg=self.settings.get("compliance",{})
-        baseline=self.baselines.load(self.active_baseline_profile)
-        overrides=dict(cfg.get("overrides",{}))
-        configured_profile=str(cfg.get("profile","DEFAULT")).upper()
-        if self.active_baseline_profile==configured_profile:
-            legacy={
-                key:value
-                for key,value in cfg.items()
-                if key not in {"profile","overrides"}
-            }
-            overrides=deep_merge(legacy,overrides)
-        return deep_merge(baseline,overrides)
+        return self.baselines.resolve(
+            self.active_baseline_profile,
+            self.settings.get("compliance",{}),
+        )
 
     def show_health(self,snapshot):
         health=calculate_health_score(snapshot,baseline=self._baseline())
