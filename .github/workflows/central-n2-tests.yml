@@ -64,7 +64,7 @@ jobs:
       - name: Mypy hardened contracts
         if: matrix.python-version == '3.12'
         run: >-
-          python -m mypy
+          python -m mypy --explicit-package-bases
           core/result.py core/context.py core/actions.py
           core/evaluation.py core/updater.py core/validation.py
           remediation/engine.py
