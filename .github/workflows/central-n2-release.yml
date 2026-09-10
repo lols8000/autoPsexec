@@ -1,41 +1,143 @@
 name: Central N2 Release
+
 on:
   push:
     tags:
       - 'v*'
+
 permissions:
   contents: write
+
 jobs:
   build:
     runs-on: windows-latest
+
     defaults:
       run:
         working-directory: central_n2
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - name: Install dependencies
-        run: python -m pip install --upgrade pip pytest pyinstaller
-      - name: Compile
-        run: python -m compileall .
-      - name: Tests
-        run: python -m pytest -q
+          cache: 'pip'
+          cache-dependency-path: central_n2/requirements-dev.txt
+
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Compile with SyntaxWarning as error
+        run: python -W error::SyntaxWarning -m compileall -q .
+
+      - name: Ruff correctness checks
+        run: >-
+          python -m ruff check
+          main.py core diagnostics playbooks remediation reports storage
+          integrations/glpi/client.py
+          ui/console_base.py ui/console_v5.py ui/tk_app.py
+          modules/health.py modules/compliance.py modules/performance.py
+          modules/updates.py modules/disk.py modules/glpi.py
+          modules/network.py modules/printers.py modules/system.py
+          modules/domain.py modules/devices.py modules/software.py
+          modules/users_profiles.py modules/workstation_tools.py
+          modules/repair.py
+          --select E4,E7,E9,F
+
+      - name: Tests with coverage
+        run: >-
+          python -m pytest -q
+          --cov=core --cov=diagnostics --cov=playbooks
+          --cov=remediation --cov=reports --cov=storage
+          --cov-report=term
+          --cov-fail-under=40
+
       - name: Build portable
-        run: pyinstaller CentralN2.spec
+        run: pyinstaller CentralN2.spec --clean --noconfirm
+
+      - name: Optionally sign portable executable
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+          WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64)) {
+            Write-Host "Signing certificate not configured; portable EXE remains unsigned."
+            exit 0
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP "central-n2-signing.pfx"
+          [IO.File]::WriteAllBytes(
+            $certPath,
+            [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64)
+          )
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName |
+            Select-Object -Last 1
+          if (-not $signTool) { throw "signtool.exe não encontrado." }
+          & $signTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certPath /p $env:WINDOWS_SIGNING_CERT_PASSWORD dist\CentralN2\CentralN2.exe
+          Remove-Item $certPath -Force
+
       - name: Zip portable
         shell: pwsh
         run: Compress-Archive -Path dist\CentralN2\* -DestinationPath dist\CentralN2-win64.zip -Force
-      - name: Install Inno Setup
-        run: choco install innosetup -y
+
+      - name: Install pinned Inno Setup
+        run: choco install innosetup --version=6.7.1 -y --no-progress
+
       - name: Build installer
         shell: pwsh
         run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\CentralN2.iss'
+
+      - name: Optionally sign installer
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+          WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64)) {
+            Write-Host "Signing certificate not configured; installer remains unsigned."
+            exit 0
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP "central-n2-signing.pfx"
+          [IO.File]::WriteAllBytes(
+            $certPath,
+            [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64)
+          )
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName |
+            Select-Object -Last 1
+          if (-not $signTool) { throw "signtool.exe não encontrado." }
+          & $signTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certPath /p $env:WINDOWS_SIGNING_CERT_PASSWORD installer\Output\CentralN2-Setup.exe
+          Remove-Item $certPath -Force
+
+      - name: Generate SHA-256 manifest
+        shell: pwsh
+        run: |
+          $files = @(
+            "dist\CentralN2-win64.zip",
+            "installer\Output\CentralN2-Setup.exe"
+          )
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash *$file"
+          }
+          $lines | Set-Content -Path SHA256SUMS.txt -Encoding ascii
+
       - name: Publish GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME dist\CentralN2-win64.zip installer\Output\CentralN2-Setup.exe --generate-notes --title "Central N2 $env:GITHUB_REF_NAME"
+        run: >-
+          gh release create $env:GITHUB_REF_NAME
+          dist\CentralN2-win64.zip
+          installer\Output\CentralN2-Setup.exe
+          SHA256SUMS.txt
+          --generate-notes
+          --title "Central N2 $env:GITHUB_REF_NAME"
