@@ -30,4 +30,4 @@ class CentralN2TkApp:
         self._run("Saúde",f)
     def slow_playbook(self):
         h=self.host.get().strip();spec=self.playbooks["slow"];collectors={"health":self.health.snapshot,"performance":lambda x:self.performance.snapshot(x,8,1),"disk":self.disk.space,"processes":self.system.list_processes,"startup":self.startup.overview};self._run("Playbook Lentidão",lambda:self.runner.run(spec,h,collectors))
-def run_gui(executor,settings_path:Path):root=tk.Tk();CentralN2TkApp(root,executor,settings_path);root.mainloop()
+def run_gui(executor, settings_path: Path, *, settings=None):\n    root = tk.Tk()\n    app = CentralN2TkApp(root, executor, settings_path)\n    app.settings = settings or {}\n    root.mainloop()
