@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 
@@ -16,6 +17,8 @@ class CachedTransport:
 
 
 class TransportManager:
+    """Seleciona e cacheia o transporte realmente utilizável por host."""
+
     def __init__(
         self,
         local: Transport,
@@ -31,9 +34,11 @@ class TransportManager:
         self.cache_ttl_seconds = max(0.0, float(cache_ttl_seconds))
         self.retry_policy = retry_policy or RetryPolicy()
         self._cache: dict[str, CachedTransport] = {}
+        self._guard = threading.RLock()
 
     def invalidate(self, host: str) -> None:
-        self._cache.pop(host.lower(), None)
+        with self._guard:
+            self._cache.pop(host.casefold(), None)
 
     def select(
         self,
@@ -41,30 +46,37 @@ class TransportManager:
         *,
         refresh: bool = False,
         winrm_result: CommandResult | None = None,
+        psexec_result: CommandResult | None = None,
     ) -> Transport:
-        key = host.lower()
+        key = host.casefold()
         now = time.monotonic()
-        cached = self._cache.get(key)
-        if cached and cached.expires_at > now and not refresh:
-            return cached.transport
+
+        with self._guard:
+            cached = self._cache.get(key)
+            if cached and cached.expires_at > now and not refresh:
+                return cached.transport
 
         if HostIdentity.is_local(host):
             selected = self.local
         else:
-            probe = winrm_result or self.retry_policy.run(
+            winrm_probe = winrm_result or self.retry_policy.run(
                 lambda: self.winrm.test(host)
             )
-            if probe.success:
+            if winrm_probe.success:
                 selected = self.winrm
             elif self.psexec.available():
-                selected = self.psexec
+                psexec_probe = psexec_result or self.retry_policy.run(
+                    lambda: self.psexec.test(host)
+                )
+                selected = self.psexec if psexec_probe.success else self.winrm
             else:
-                # Mantém WinRM como transporte nominal para que o erro
-                # diagnóstico original seja preservado ao operador.
+                # Sem fallback utilizável, preserva WinRM para que o erro de
+                # conectividade/autenticação continue visível ao operador.
                 selected = self.winrm
 
-        self._cache[key] = CachedTransport(
-            selected,
-            now + self.cache_ttl_seconds,
-        )
+        with self._guard:
+            self._cache[key] = CachedTransport(
+                selected,
+                now + self.cache_ttl_seconds,
+            )
         return selected
