@@ -16,7 +16,8 @@ from diagnostics.engine import DiagnosticEngine
 from diagnostics.correlation import CorrelationEngine
 from integrations.glpi.client import GLPIClient,GLPIError
 from modules.compliance import evaluate_compliance
-from playbooks import PlaybookRunner,builtin_playbooks
+from modules.health import calculate_health_score
+from playbooks import PlaybookAnalyzer,PlaybookRunner,builtin_playbooks
 from remediation import RemediationEngine,RemediationSpec
 from reports import ReportExporter,SupportReportBuilder
 from storage import CentralDatabase,diff_values
@@ -28,7 +29,7 @@ class ConsoleUIV5(ConsoleUIV3):
         persistence=self.settings.get("persistence",{});db_path=Path(persistence.get("database","data/central_n2.db"));db_path=db_path if db_path.is_absolute() else settings_path.parent.parent/db_path;self.db=CentralDatabase(db_path) if persistence.get("enabled",True) else None
         self.job_manager.set_observer(self.db.save_job if self.db else None)
         self.active_baseline_profile=str(self.settings.get("compliance",{}).get("profile","DEFAULT")).upper()
-        self.engine=DiagnosticEngine();self.correlator=CorrelationEngine();self.playbook_runner=PlaybookRunner();self.playbooks=builtin_playbooks();self.remediation_engine=RemediationEngine();self.report_builder=SupportReportBuilder();self.report_exporter=ReportExporter(settings_path.parent.parent/"reports"/"support")
+        self.engine=DiagnosticEngine();self.correlator=CorrelationEngine();self.playbook_runner=PlaybookRunner();self.playbook_analyzer=PlaybookAnalyzer(self.engine);self.playbooks=builtin_playbooks();self.remediation_engine=RemediationEngine();self.report_builder=SupportReportBuilder();self.report_exporter=ReportExporter(settings_path.parent.parent/"reports"/"support")
         cfg=self.settings.get("updates",{});self.updater=UpdateManager(cfg.get("repository","lols8000/autoPsexec"),__version__);self.update_dir=settings_path.parent.parent/"updates";self.current_session=None;self.context=AttendanceContext.start();self.correlation_id=self.context.correlation_id;self.last_diagnoses=[];self.last_playbook=None;self.last_remediation=None;self.last_report_path=None
     def run(self):
         try:
@@ -52,9 +53,36 @@ class ConsoleUIV5(ConsoleUIV3):
         self.pause()
     def _baseline(self):
         cfg=self.settings.get("compliance",{})
-        effective=dict(cfg)
-        effective["profile"]=self.active_baseline_profile
-        return deep_merge(self.baselines.load(self.active_baseline_profile),effective)
+        baseline=self.baselines.load(self.active_baseline_profile)
+        overrides=dict(cfg.get("overrides",{}))
+        configured_profile=str(cfg.get("profile","DEFAULT")).upper()
+        if self.active_baseline_profile==configured_profile:
+            legacy={
+                key:value
+                for key,value in cfg.items()
+                if key not in {"profile","overrides"}
+            }
+            overrides=deep_merge(legacy,overrides)
+        return deep_merge(baseline,overrides)
+
+    def show_health(self,snapshot):
+        health=calculate_health_score(snapshot,baseline=self._baseline())
+        print("\n=== SAÚDE DA ESTAÇÃO ===")
+        print(
+            f"Score: {health['score']}/100 | "
+            f"Estado: {health['overall_state']} | "
+            f"CPU: {snapshot.get('CPUPercent','-')}% | "
+            f"RAM: {snapshot.get('RAMUsedPercent','-')}% | "
+            f"Disco livre: {snapshot.get('DiskFreePercent','-')}% | "
+            f"Uptime: {snapshot.get('UptimeDays','-')} dias"
+        )
+        if health["unknown"]:
+            print(f"⚠ Métricas indisponíveis: {health['unknown']}")
+        for item in health["findings"]:
+            symbol="?" if item.get("state")=="UNKNOWN" else "!"
+            print(f" - [{symbol} {item['severity'].upper()}] {item['message']}")
+        if not health["findings"]:
+            print("Nenhum desvio relevante encontrado.")
 
     def _trace(self,func:Callable,**context):
         def wrapped():
@@ -106,15 +134,17 @@ class ConsoleUIV5(ConsoleUIV3):
         return result
     def _persist_health(self,data):
         if self.db:self.db.save_snapshot(self.host,data,kind="health")
-        findings=self.engine.evaluate(data);self.last_diagnoses=self.correlator.correlate(findings)
+        findings=self.engine.evaluate(data,self._baseline());self.last_diagnoses=self.correlator.correlate(findings)
         if self.db:
             for f in findings:self.db.save_finding(self.host,f.id,f.severity.value,asdict(f))
     def menu_health(self):
         if not self.require_host():return
         self.clear();r=self.execute("Coletando saúde e compliance",lambda:self.health.snapshot(self.host),timeout=120)
         if r and r.success and isinstance(r.data,dict):
-            self.health_snapshot=r.data;self.show_health(r.data);self._persist_health(r.data);comp=evaluate_compliance(r.data,self._baseline());print(f"\nCompliance: {comp['score']}/100 ({comp['compliant']}/{comp['total']})")
-            for i in comp["items"]:print(f" {'✓' if i['compliant'] else '✗'} {i['label']}: {i['actual']} | esperado {i['expected']}")
+            self.health_snapshot=r.data;self.show_health(r.data);self._persist_health(r.data);comp=evaluate_compliance(r.data,self._baseline());score="-" if comp["score"] is None else comp["score"];print(f"\nCompliance: {score}/100 | estado {comp['overall_state']} | PASS {comp['compliant']} | FAIL {comp['failed']} | UNKNOWN {comp['unknown']}")
+            for i in comp["items"]:
+                symbol={"PASS":"✓","FAIL":"✗","UNKNOWN":"?","NOT_APPLICABLE":"-"}.get(i["state"],"?")
+                print(f" {symbol} {i['label']}: {i['actual']} | esperado {i['expected']} | {i['state']}")
             for d in self.last_diagnoses:print(f" - {d.title} | confiança {d.confidence}: {d.rationale}")
         self.pause()
     def menu_repair(self):
@@ -215,11 +245,12 @@ class ConsoleUIV5(ConsoleUIV3):
         spec=self.playbooks[keys[int(op)-1]]
         try:execution=self.job_manager.run_sync(self.host,f"Playbook {spec.title}",self._trace(lambda:self.playbook_runner.run(spec,self.host,self._collectors(),on_step=lambda i,t,s:print(f"[{i}/{t}] {s.label}...")),action=f"Playbook {spec.title}"),operation_class=OperationClass.READ_ONLY,timeout=self.long_timeout,on_tick=lambda _:None,correlation_id=self.correlation_id)
         except Exception as exc:print(f"✗ {exc}");self.pause();return
-        self.last_playbook=execution;merged={}
+        self.last_playbook=execution
         for st in execution.steps:
-            if st.get("success") and isinstance(st.get("data"),dict):merged.update(st["data"])
             print(f"{'✓' if st.get('success') else '✗'} {st['label']} [{st.get('transport','-')}] {st.get('error') or ''}")
-        findings=self.engine.evaluate(merged);self.last_diagnoses=self.correlator.correlate(findings)
+        findings=self.playbook_analyzer.analyze(execution,policy=self._baseline());self.last_diagnoses=self.correlator.correlate(findings)
+        if not findings:
+            print("- Análise: nenhuma causa objetiva foi confirmada; resultado inconclusivo.")
         if self.db:self.db.save_snapshot(self.host,asdict(execution),kind=f"playbook:{spec.key}")
         for d in self.last_diagnoses:print(f"- {d.title} ({d.confidence}): {d.rationale}")
         self.pause()
