@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -14,8 +14,18 @@ class CommandResult:
     return_code: int = 0
     duration_ms: int = 0
     transport: str = "local"
-    data: Optional[Any] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    data: Any = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def indeterminate(self) -> bool:
+        """True quando a ação pode ter chegado ao destino, mas não houve confirmação."""
+        return bool(self.metadata.get("indeterminate"))
+
+    def mark_indeterminate(self, reason: str) -> "CommandResult":
+        self.metadata["indeterminate"] = True
+        self.metadata["indeterminate_reason"] = reason
+        return self
 
     @classmethod
     def failure(

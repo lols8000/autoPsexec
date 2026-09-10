@@ -1,182 +1,158 @@
-# Central N2 Workstation — Guia rápido v5
+# Central N2 Workstation — Guia rápido 5.1.0
 
-**Versão:** 5.0.0  
-**Console:** python main.py  
-**GUI opcional:** python main.py --gui
+A Central N2 é uma plataforma de troubleshooting e remediação controlada para estações Windows. O fluxo operacional é:
 
-## Visão rápida
+\`\`\`text
+EVIDÊNCIA → DIAGNÓSTICO → REMEDIAÇÃO → VALIDAÇÃO → REGISTRO
+\`\`\`
 
-A v5 detecta automaticamente quando o alvo é a própria estação e executa localmente. Para destinos remotos, WinRM é preferido e PsExec é fallback.
-
-~~~text
-LOCAL → execução direta
-
-REMOTO
-  ↓
-WinRM utilizável?
-  ├─ SIM → WinRM
-  └─ NÃO → PsExec, se disponível
-~~~
-
-WinRM não é requisito absoluto. Um ambiente com 5985 bloqueada ainda pode ser administrado por PsExec se SMB/445 e ADMIN$ estiverem disponíveis.
-
-## Requisitos
-
-- Windows 10/11 ou Windows Server como estação administrativa;
-- Python 3.10+ para execução por código-fonte;
-- privilégio administrativo;
-- conectividade com o host alvo;
-- WinRM configurado, quando usado;
-- PsExec disponível quando for necessário fallback;
-- Sysinternals opcional.
-
-## PsExec recomendado
-
-Diretório operacional recomendado:
-
-~~~text
-C:\Sysinternals\
-~~~
-
-Validação:
-
-~~~powershell
-Test-Path C:\Sysinternals\PsExec.exe
-Get-Command PsExec.exe -ErrorAction SilentlyContinue
-~~~
-
-Teste remoto:
-
-~~~powershell
-C:\Sysinternals\PsExec.exe -accepteula \\PC023 hostname
-~~~
-
-A Central também procura PsExec em C:\Windows\System32 e no PATH.
-
-## Configuração local
-
-Copie:
-
-~~~text
-config\settings.local.example.json
-~~~
-
-para:
-
-~~~text
-config\settings.local.json
-~~~
-
-O ConfigLoader aplica merge recursivo sobre settings.json. Nunca versione segredos.
-
-## Iniciar
+## Executar
 
 Da raiz do repositório:
 
-~~~powershell
+\`\`\`powershell
 python .\central_n2\main.py
-~~~
+\`\`\`
 
-Ou:
+GUI opcional:
 
-~~~powershell
-cd central_n2
-python .\main.py
-~~~
+\`\`\`powershell
+python .\central_n2\main.py --gui
+\`\`\`
 
-A aplicação solicita UAC quando necessário.
+A aplicação solicita elevação UAC quando necessário.
 
-## Menu v5
+## Transporte
 
-~~~text
-[1]  Selecionar estação
-[2]  Saúde / Compliance
-[3]  Performance
-[4]  Reparo do Windows
-[5]  Hardware / Drivers / Dispositivos
-[6]  Inicialização / Tarefas
-[7]  Crashes / BSOD
-[8]  Segurança
-[9]  Rede
-[10] Usuários / Perfis
-[11] Software / GLPI Agent
-[12] Impressoras
-[13] Domínio / GPO
-[14] Disco / Armazenamento / Bateria
-[15] Ferramentas avançadas
-[16] Sysinternals
-[17] Pacote de diagnóstico
-[18] Energia / Processos / Serviços
-[19] Conectividade / Capabilities
-[20] Assistente N2 / Playbooks
-[21] Histórico / Diff
-[22] Gerar relatório
-[23] Jobs
-[24] Atualização da Central
-[25] GLPI API
-[26] Remediações guiadas
-[27] Perfil / Baseline
-[0]  Sair
-~~~
+A seleção é automática:
 
-## Retorno visual
+\`\`\`text
+alvo local
+  → Local
 
-Exemplo:
+alvo remoto
+  → WinRM autenticado e executável?
+      → SIM: WinRM
+      → NÃO: ADMIN$ + PsExec válidos?
+          → SIM: PsExec
+          → NÃO: sem transporte administrativo
+\`\`\`
 
-~~~text
-✓ SUCESSO [psexec] — 48060 ms
-~~~
+\`READY_WINRM\` só é emitido depois que o preflight valida o listener e uma execução real de \`Invoke-Command\`.
 
-Resultados estruturados são formatados como tabela quando possível.
+Estados de conectividade:
 
-### Exemplo: drivers
+- \`READY_LOCAL\`
+- \`READY_WINRM\`
+- \`READY_PSEXEC\`
+- \`DNS_FAILED\`
+- \`AUTHENTICATION_FAILED\`
+- \`NETWORK_UNREACHABLE\`
+- \`NO_USABLE_TRANSPORT\`
 
-~~~text
-Dispositivo                         | Fabricante              | Versão           | Data       | Assinado | INF
-------------------------------------+-------------------------+------------------+------------+----------+----------
-AMD Radeon(TM) Graphics             | Advanced Micro Devices  | 31.0.12027.9001  | 2023-03-30 | SIM      | oem53.inf
-AMD High Definition Audio Device    | Advanced Micro Devices  | 10.0.1.38        | 2024-04-26 | SIM      | oem48.inf
+WinRM não é requisito absoluto. Em ambiente com 5985 bloqueada, a Central pode operar via PsExec quando TCP 445, ADMIN$ e privilégios administrativos estiverem disponíveis e o executável PsExec estiver homologado na estação administrativa.
 
-Resumo: 2 instâncias | 2 entradas agrupadas | 0 não assinada(s)
-~~~
+## Fallback seguro
 
-No PsExec, mensagens técnicas como Starting powershell.exe, CLIXML e exit code 0 são removidas quando são apenas ruído de uma execução bem-sucedida. Falhas reais não são escondidas.
+Leituras podem ser repetidas automaticamente em PsExec após falha de WinRM.
 
-## Diagnóstico de transporte
+Mutações seguem outra regra:
 
-Quando WinRM falhar:
+\`\`\`text
+falha comprovadamente antes da execução
+  → fallback permitido
 
-~~~powershell
-Resolve-DnsName PC023
-Test-NetConnection PC023 -Port 5985
+ação pode ter chegado ao host, mas a confirmação se perdeu
+  → resultado INDETERMINADO
+  → fallback automático bloqueado
+  → validar o estado antes de repetir
+\`\`\`
+
+Isso evita executar duas vezes ações como reset, instalação, cleanup ou alteração de serviço.
+
+## Compliance
+
+A avaliação usa quatro estados:
+
+- **PASS** — evidência disponível e dentro do baseline;
+- **FAIL** — evidência disponível e fora do baseline;
+- **UNKNOWN** — métrica não pôde ser obtida;
+- **N/A** — controle não é exigido pelo baseline.
+
+\`UNKNOWN\` não é tratado como \`FAIL\`. N/A não entra no denominador do score de compliance.
+
+## Remediações guiadas
+
+Atualmente possuem validação específica:
+
+- limpeza segura de temporários;
+- reinício do Spooler;
+- reset de componentes do Windows Update;
+- GPUpdate /force.
+
+A Central coleta evidência antes/depois quando aplicável e registra o estado de validação como \`PASS\`, \`FAIL\` ou \`UNKNOWN\`.
+
+## Configuração
+
+Base pública:
+
+\`\`\`text
+config\settings.json
+\`\`\`
+
+Override local não versionado:
+
+\`\`\`text
+config\settings.local.json
+\`\`\`
+
+Use \`config\settings.local.example.json\` como modelo. O merge é recursivo. Segredos, URLs internas e caminhos privados ficam apenas no arquivo local.
+
+## PsExec
+
+Diretório recomendado:
+
+\`\`\`text
+C:\Sysinternals\PsExec.exe
+\`\`\`
+
+A Central também procura no PATH e em \`C:\Windows\System32\PsExec.exe\`.
+
+Validação manual:
+
+\`\`\`powershell
 Test-NetConnection PC023 -Port 445
 Test-Path \\PC023\ADMIN$
-Test-Path C:\Sysinternals\PsExec.exe
-~~~
+C:\Sysinternals\PsExec.exe -accepteula -nobanner \\PC023 cmd.exe /d /c echo CENTRAL_N2_OK
+\`\`\`
 
-Interpretação típica:
+## Persistência
 
-~~~text
-Ping/SMB/ADMIN$ OK + WinRM 5985 FAIL + PsExec disponível
-→ estação administrável por PsExec
-~~~
+Por padrão:
 
-## Operação segura
+\`\`\`text
+data\central_n2.db
+\`\`\`
 
-Fluxo recomendado:
+SQLite usa WAL, migrations versionadas e retenção configurável. O schema é validado na inicialização. Jobs, snapshots, findings, remediações e relatórios carregam \`correlation_id\`.
 
-~~~text
-Saúde
- ↓
-Diagnóstico / Playbook
- ↓
-Confirmar causa
- ↓
-Remediar
- ↓
-Validar antes/depois
- ↓
-Gerar relatório / histórico
-~~~
+## Atualizações
 
-Timeout local não garante que um processo remoto já iniciado tenha sido encerrado.
+O menu de atualização respeita \`updates.enabled\`. Downloads são feitos de forma controlada; a Central não se substitui silenciosamente.
+
+Quando um asset publica digest SHA-256, o updater verifica o hash antes de promover o arquivo temporário ao destino final.
+
+## Testes
+
+\`\`\`powershell
+cd central_n2
+python -m pip install -r requirements-dev.txt
+python -W error::SyntaxWarning -m compileall -q .
+python -m pytest -q
+\`\`\`
+
+O CI também executa Ruff, mypy, coverage, matriz Python e smoke de build/instalador.
+
+## Documentação
+
+Consulte \`docs/README.md\` para arquitetura, operação, segurança, configuração, troubleshooting, desenvolvimento e distribuição.

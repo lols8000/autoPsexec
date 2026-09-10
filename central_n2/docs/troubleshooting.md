@@ -1,203 +1,210 @@
-# Troubleshooting — Central N2 Workstation v5
+# Troubleshooting — Central N2 Workstation 5.1.0
 
 ## Central não inicia
 
-Valide Python 3.10+ ou use pacote distribuído.
-
-~~~powershell
+\`\`\`powershell
 python --version
-~~~
+python .\central_n2\main.py --version
+\`\`\`
 
-## Configuração não encontrada
+Python 3.10+ é suportado pelo CI.
 
-~~~powershell
+## Configuração inválida
+
+Valide:
+
+\`\`\`powershell
 Test-Path .\central_n2\config\settings.json
-~~~
+\`\`\`
+
+\`settings.local.json\` deve conter JSON válido e é aplicado por merge recursivo.
 
 ## UAC
 
-~~~powershell
-Start-Process powershell -Verb RunAs
-~~~
+Se a elevação falhar, execute o terminal autorizado como administrador e revise política/UAC. Não contorne o controle.
 
 ## Hostname não resolve
 
-~~~powershell
+\`\`\`powershell
 Resolve-DnsName PC023
 ping PC023
-~~~
+\`\`\`
 
-Prefira corrigir DNS a operar permanentemente por IP.
+Estado esperado da Central: \`DNS_FAILED\`.
+
+Prefira corrigir DNS a operar permanentemente por IP em domínio.
 
 ## Ping falha
 
-Ping não prova sozinho host offline. Teste serviços.
+Ping isolado não prova host offline. Teste serviços:
 
-~~~powershell
-Test-NetConnection PC023 -Port 5985
+\`\`\`powershell
 Test-NetConnection PC023 -Port 445
-~~~
+Test-NetConnection PC023 -Port 5985
+\`\`\`
 
-## WinRM 5985 falha
+A Central avalia portas independentemente do ICMP.
 
-Se:
-
-~~~text
-PingSucceeded: True
-TcpTestSucceeded: False
-RemotePort: 5985
-~~~
-
-a conexão não chegou ao serviço WinRM.
+## 5985 falha
 
 Possíveis causas:
 
 - WinRM parado;
 - listener ausente;
-- firewall do endpoint;
-- regra restrita a LocalSubnet;
-- ACL/firewall entre redes;
-- política de domínio.
+- Firewall;
+- LocalSubnet;
+- ACL entre redes;
+- GPO.
 
-No destino:
+Se 445/ADMIN$/PsExec funcionarem, o host pode ficar \`READY_PSEXEC\`.
 
-~~~powershell
-Get-Service WinRM
-winrm enumerate winrm/config/listener
-Get-NetConnectionProfile
-~~~
+## WinRM por IP / CannotUseIPAddress
 
-## WinRM por IP retorna CannotUseIPAddress
+É tipicamente autenticação WinRM por IP, não reachability.
 
-Isso é problema de autenticação WinRM por IP, não de reachability.
+Use hostname/FQDN quando possível.
 
-Em domínio, use hostname/FQDN.
+Evite \`TrustedHosts=*\`.
 
-Evite TrustedHosts=*.
+## Test-WSMan funciona, mas Invoke-Command falha
 
-## Test-WSMan funciona, Invoke-Command falha
+Na 5.1.0, o preflight já testa os dois. O host **não** deve ficar \`READY_WINRM\` se o \`Invoke-Command\` mínimo falhar.
 
-Test-WSMan prova listener WSMan, não necessariamente autenticação PowerShell Remoting completa.
+Teste manual equivalente:
 
-Teste:
-
-~~~powershell
-Invoke-Command -ComputerName PC023 -ScriptBlock { hostname }
-~~~
+\`\`\`powershell
+Test-WSMan PC023
+Invoke-Command -ComputerName PC023 -ScriptBlock { 'CENTRAL_N2_WINRM_OK' }
+\`\`\`
 
 ## PsExec não encontrado
 
-~~~powershell
+\`\`\`powershell
 Test-Path C:\Sysinternals\PsExec.exe
 Test-Path C:\Windows\System32\PsExec.exe
 Get-Command PsExec.exe -ErrorAction SilentlyContinue
-~~~
+\`\`\`
 
-## Instalar PsExec na estação administrativa
+Copie apenas binário homologado para diretório controlado. A Central não o baixa.
 
-A Central não instala automaticamente. Use binário homologado da Microsoft Sysinternals e coloque em diretório controlado, por exemplo:
+## ADMIN$ funciona, mas PsExec não
 
-~~~text
-C:\Sysinternals\PsExec.exe
-~~~
+ADMIN$ é requisito importante, mas não garante PsExec. Teste execução real:
 
-Feche e reabra a Central depois de copiar o executável, pois o executor descobre PsExec na inicialização.
+\`\`\`powershell
+C:\Sysinternals\PsExec.exe -accepteula -nobanner \\PC023 cmd.exe /d /c echo CENTRAL_N2_OK
+\`\`\`
 
-## Validar PsExec
+Revise EDR, SCM remoto, privilégio administrativo e política.
 
-~~~powershell
-Test-NetConnection PC023 -Port 445
-dir \\PC023\ADMIN$
-C:\Sysinternals\PsExec.exe -accepteula \\PC023 hostname
-~~~
+## AUTHENTICATION_FAILED
 
-## ADMIN$ funciona e WinRM não
+A rede responde, mas autenticação/autorização falhou em WinRM, ADMIN$ ou PsExec.
 
-Isso é um cenário suportado.
+Não trate como falha de rede.
 
-~~~text
-445/ADMIN$ OK + PsExec disponível → fallback PsExec
-~~~
+## NO_USABLE_TRANSPORT
 
-Não é obrigatório abrir 5985 somente para a Central funcionar.
+O host é alcançável, porém nenhum transporte administrativo foi validado.
 
-## PsExec Access Denied
+Use o menu Conectividade/Capabilities e separe cada camada.
 
-Verifique:
+## NETWORK_UNREACHABLE
 
-- conta administrativa;
-- ADMIN$;
-- UAC remoto;
-- política/EDR;
-- contexto de domínio.
+Nenhum caminho administrativo conhecido respondeu. Revise rota, firewall, VLAN, host desligado e políticas.
 
-Não desative segurança globalmente.
+## Resultado INDETERMINADO
 
-## Saída mostra Starting powershell.exe / CLIXML
+Sintoma: a ação pode ter sido enviada, mas a comunicação caiu.
 
-No master atual, isso deve ser filtrado em execuções PsExec bem-sucedidas.
+Conduta:
 
-Se reaparecer:
+1. não repetir automaticamente;
+2. consultar o estado final;
+3. procurar evidência local/remota;
+4. decidir conscientemente se precisa repetir.
 
-1. confirme git pull;
-2. reinicie a Central;
-3. confirme versão/commit;
-4. preserve a saída em caso de falha real.
-
-## JSON bruto em listas
-
-A UI atual tenta renderizar listas de dicionários como tabela. Se JSON bruto aparecer, pode ser:
-
-- estrutura complexa;
-- parser não encontrou JSON válido;
-- retorno textual do comando;
-- execução em versão antiga.
-
-## DriverDate aparece como /Date(...)/
-
-O módulo de drivers atual normaliza data para yyyy-MM-dd antes de serializar.
-
-Se aparecer formato legado, atualize o master e reinicie.
-
-## Winget não funciona via PsExec
-
-Winget pode depender do perfil do usuário/App Installer e não existir sob SYSTEM.
-
-## GLPI
-
-Se status funciona e instalação não, valide installer_source no settings.local.json e acesso ao recurso de origem.
-
-## Sysinternals ausente
-
-~~~powershell
-Get-ChildItem C:\Sysinternals
-~~~
+O executor deve mostrar que o fallback foi suprimido.
 
 ## Timeout
 
-Não repita uma remediação pesada imediatamente. Timeout local não prova término remoto.
+Timeout da Central não prova que o processo remoto parou.
+
+Antes de repetir DISM/SFC/install/reset, verifique processo, serviço ou log correspondente.
+
+## Winget retorna falso sucesso
+
+Na 5.1.0, install/upgrade/uninstall verificam \`$LASTEXITCODE\`. Se reaparecer falso sucesso, confirme a versão em execução.
+
+## JSON não parseado após mutação
+
+Quando uma mutação termina mas o retorno estruturado não pode ser validado, o resultado é marcado como indeterminado. Investigue antes de repetir.
+
+## Spooler
+
+Após remediação, o validador exige \`Status=Running\`.
+
+UNKNOWN significa que a Central não conseguiu confirmar o estado final.
+
+## Reset de Windows Update
+
+A rotina registra os serviços originalmente ativos e tenta restaurá-los em \`finally\`. O validador exige confirmação de restauração.
+
+## Compliance UNKNOWN
+
+UNKNOWN significa métrica indisponível, não falha.
+
+Exemplo: TPM/Secure Boot podem ser indisponíveis por firmware/cmdlet/permissão.
+
+## Compliance N/A
+
+N/A significa que o baseline não exige o controle. Não é erro de coleta.
 
 ## Bateria ausente
 
-Normal em desktop ou firmware que não expõe dados.
+Normal em desktop ou hardware que não expõe WMI de bateria.
 
 ## Get-PhysicalDisk incompleto
 
-Controladores podem esconder telemetria.
+RAID/controladores podem ocultar telemetria. Trate ausência de dados como limitação de evidência.
 
 ## Logs
 
-Consulte central_n2/logs. Não publique logs reais sem sanitização.
+Diretório:
 
-## Checklist rápido
+\`\`\`text
+central_n2\logs
+\`\`\`
 
-~~~powershell
+Não publique logs reais sem sanitização.
+
+## SQLite
+
+Se a Central reportar falha no \`quick_check\`, preserve o banco antes de qualquer tentativa de reparo.
+
+Não altere \`user_version\` manualmente.
+
+## Updater
+
+Falhas possíveis:
+
+- tag fora de SemVer;
+- asset com nome inválido;
+- URL não HTTPS;
+- tamanho divergente;
+- SHA-256 divergente;
+- erro de rede.
+
+Arquivo parcial deve ser removido e o destino final não deve ser promovido.
+
+## Checklist de transporte
+
+\`\`\`powershell
 Resolve-DnsName PC023
-Test-NetConnection PC023 -Port 5985
 Test-NetConnection PC023 -Port 445
+Test-NetConnection PC023 -Port 5985
 Test-Path \\PC023\ADMIN$
 Test-Path C:\Sysinternals\PsExec.exe
 Test-WSMan PC023
-~~~
-
-Interprete cada camada separadamente.
+Invoke-Command -ComputerName PC023 -ScriptBlock { hostname }
+\`\`\`

@@ -1,5 +1,5 @@
 #define MyAppName "Central N2 Workstation"
-#define MyAppVersion "5.0.0"
+#define MyAppVersion "5.1.0"
 #define MyAppExeName "CentralN2.exe"
 [Setup]
 AppId={{18E9E450-3509-4A3C-9CB7-6C29C5100D20}

@@ -1,27 +1,76 @@
 # Changelog
 
-## Unreleased — 2026-09-04
+## 5.1.0 — 2026-09-10
 
-### Changed
+### Arquitetura
 
-- resultados estruturados em lista passam a ser apresentados como tabelas quando possível;
-- inventário de drivers agora normaliza data, agrupa entradas idênticas e reduz registros vazios;
-- view de drivers exibe Dispositivo, Fabricante, Versão, Data, Assinado, INF e Quantidade;
-- parser JSON aceita payload válido mesmo quando o transporte adiciona texto antes/depois;
-- PsExec remove mensagens operacionais sem valor em execuções bem-sucedidas;
-- documentação atualizada para o comportamento v5 real, incluindo settings.local.json e fallback PsExec em ambientes sem WinRM.
+- Console v5 migrado para \`ConsoleBase\`, sem herança operacional de \`ConsoleUIV3\`.
+- \`AttendanceContext\` tornou-se a fonte única de estado do atendimento para sessão, snapshot de saúde, diagnósticos, playbook, remediação, relatório e \`correlation_id\`.
+- configuração carregada uma única vez no bootstrap e injetada no executor e nas interfaces;
+- \`JobManager\` consolidado como scheduler da aplicação, com serialização por host para operações não somente-leitura;
+- \`BatchRunner\` passou a poder utilizar o scheduler compartilhado;
+- processos remotos rastreados passaram a usar os caminhos explícitos de mutação do executor.
 
-### Fixed
+### Transporte e segurança de execução
 
-- saída de inventário via PsExec não deve mais despejar Starting powershell.exe, exit code 0 ou CLIXML quando forem apenas ruído;
-- JSON estruturado deixa de cair para texto bruto apenas por ruído de transporte;
-- documentação antiga marcada como v3 foi promovida para v5.
+- o preflight WinRM só considera \`READY_WINRM\` após validar \`Test-WSMan\` e uma execução real de \`Invoke-Command\`;
+- conectividade separa DNS, ping, TCP 445, TCP 5985/5986, ADMIN$, WinRM autenticado e PsExec;
+- estados operacionais de conectividade: \`READY_LOCAL\`, \`READY_WINRM\`, \`READY_PSEXEC\`, \`DNS_FAILED\`, \`AUTHENTICATION_FAILED\`, \`NETWORK_UNREACHABLE\` e \`NO_USABLE_TRANSPORT\`;
+- leituras podem fazer fallback WinRM → PsExec em falha de transporte;
+- mutações só fazem fallback quando a falha é comprovadamente anterior à execução remota;
+- quando uma mutação pode ter chegado ao destino e a confirmação se perde, o resultado é marcado como **indeterminado** e o fallback automático é bloqueado;
+- resultados JSON de mutação que não puderem ser validados também são marcados como indeterminados;
+- PsExec continua filtrando apenas ruído de transporte em execuções bem-sucedidas, preservando erros reais.
 
-### Tests
+### Diagnóstico, compliance e remediação
 
-- teste de parser JSON com ruído PsExec;
-- teste de limpeza de CLIXML em sucesso;
-- teste garantindo preservação de erro real.
+- motor de avaliação unificado com estados \`PASS\`, \`FAIL\`, \`UNKNOWN\` e \`NOT_APPLICABLE\`;
+- controles opcionais desabilitados pelo baseline agora aparecem explicitamente como N/A, sem entrar no denominador do compliance;
+- métricas ausentes são \`UNKNOWN\`, não falso \`FAIL\`;
+- remediações guiadas possuem validadores específicos para Spooler, limpeza segura, Windows Update e GPUpdate;
+- reset de Windows Update registra restauração dos serviços originalmente ativos;
+- limpeza segura retorna dados estruturados e não toca a Lixeira;
+- Winget propaga \`$LASTEXITCODE\` diferente de zero como falha real.
+
+### Persistência e observabilidade
+
+- SQLite passou a usar migrations versionadas com \`PRAGMA user_version\`;
+- schema atual: versão 2;
+- \`correlation_id\` persiste em snapshots, jobs, findings, remediações e relatórios;
+- inicialização executa \`PRAGMA quick_check\`;
+- retenção remove registros antigos de snapshots, jobs, findings, remediações e relatórios;
+- logger tornou-se thread-safe, compacto por padrão e continua aplicando redaction de segredos;
+- payloads verbosos de auditoria permanecem opt-in.
+
+### Atualização e distribuição
+
+- versão promovida para 5.1.0 em runtime, VERSION, pyproject, metadata do EXE e instalador;
+- updater passou a usar SemVer real;
+- download de atualização é feito em arquivo temporário, com validação de tamanho e SHA-256 quando o release publica digest, seguido de substituição atômica;
+- nomes de assets são validados contra path traversal;
+- \`updates.enabled\` agora é respeitado em runtime;
+- knobs sem efeito foram removidos da configuração pública;
+- PyInstaller usa \`upx=False\` e metadata de versão Windows;
+- release publica manifesto \`SHA256SUMS.txt\`;
+- assinatura Authenticode é suportada opcionalmente quando certificado é fornecido via secrets do CI.
+
+### CI / qualidade
+
+- dependências de desenvolvimento/CI fixadas em \`requirements-dev.txt\`;
+- matriz Windows com Python 3.10, 3.12 e 3.13;
+- \`SyntaxWarning\` tratado como erro;
+- Ruff como gate de correção;
+- mypy aplicado aos contratos endurecidos;
+- coverage mínimo como gate;
+- build portátil PyInstaller e smoke do instalador Inno Setup;
+- Inno Setup fixado em 6.7.1;
+- GitHub Actions fixadas por SHA imutável;
+- testes adicionados para bootstrap real da v5, estado único, migrations, logger compacto, SemVer, updater atômico, SHA-256, fallback seguro, WinRM autenticado, N/A de compliance e consistência de versão.
+
+### Compatibilidade
+
+- scripts históricos da raiz permanecem como referência;
+- \`ConsoleUIV3\` permanece no repositório apenas como histórico/compatibilidade, não como base da UI operacional v5.
 
 ## 5.0.0 — 2026-09-03
 

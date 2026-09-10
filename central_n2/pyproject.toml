@@ -1,13 +1,23 @@
 [project]
 name = "central-n2"
-version = "5.0.0"
+version = "5.1.0"
 description = "Central de diagnóstico, administração e troubleshooting para suporte N2 em estações Windows"
 requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pyinstaller>=6.0"]
+dev = ["pytest>=9.1", "pytest-cov>=7.0", "pyinstaller>=6.22", "ruff>=0.16", "mypy>=1.18"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.mypy]
+python_version = "3.10"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true

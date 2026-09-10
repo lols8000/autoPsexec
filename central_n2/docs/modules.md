@@ -1,236 +1,220 @@
-# Catálogo de módulos — Central N2 Workstation v5
+# Catálogo de módulos — Central N2 Workstation 5.1.0
 
 ## Convenções
 
-- **Consulta:** somente leitura.
-- **Remediação:** altera estado da estação.
-- **Disruptiva:** pode interromper serviço, rede ou sessão.
-- **Longa:** pode levar minutos.
-- **Confirmação:** exigida quando a ação tem impacto relevante.
+- **READ_ONLY**: consulta leve;
+- **HEAVY_READ**: consulta custosa;
+- **LIGHT_WRITE**: alteração de baixo impacto;
+- **HEAVY_WRITE**: alteração pesada;
+- **DISRUPTIVE**: pode afetar sessão/rede/energia.
+
+Operações não READ_ONLY são serializadas por host pelo JobManager.
 
 ## Saúde / Compliance
 
-**health.py** coleta hostname, usuário, Windows/build, fabricante/modelo, CPU, RAM, disco, uptime, reboot pendente, serviços automáticos parados, Defender, Firewall, GLPI, BitLocker, TPM e Secure Boot.
+\`health.py\` coleta host, usuário, Windows/build, hardware, CPU, RAM, disco, uptime, reboot pendente, serviços automáticos, Defender, Firewall, GLPI, BitLocker, TPM e Secure Boot.
 
-**compliance.py** compara o snapshot com o baseline ativo.
+\`compliance.py\` usa o motor comum de avaliação.
 
-Tipo: consulta/análise.
+Estados: PASS, FAIL, UNKNOWN e NOT_APPLICABLE.
 
 ## Performance
 
-**performance.py** amostra CPU, RAM, disco e rede e identifica processos dominantes.
+\`performance.py\` amostra CPU, RAM, disco e rede e identifica processos dominantes.
 
-Tipo: consulta temporizada.
+## Reparo Windows
 
-## Reparo do Windows
+\`repair.py\` expõe SFC, DISM, Component Store, CHKDSK e WMI.
 
-**repair.py**:
+Operações pesadas usam classes de job compatíveis com serialização por host.
 
-- SFC /scannow;
-- DISM CheckHealth;
-- DISM ScanHealth;
-- DISM RestoreHealth;
-- AnalyzeComponentStore;
-- StartComponentCleanup;
-- CHKDSK /scan;
-- verificação WMI.
+## Dispositivos / Drivers
 
-SFC/DISM/cleanup são operações pesadas. A v5 classifica essas ações para evitar concorrência incompatível por host.
+\`devices.py\`:
 
-## Dispositivos e drivers
+- PnP com erro;
+- inventário de drivers;
+- USB;
+- rescan;
+- exportação.
 
-**devices.py**:
-
-- dispositivos PnP com erro;
-- drivers assinados;
-- USB presentes;
-- pnputil /scan-devices;
-- exportação de drivers.
-
-### Inventário de drivers v5
-
-O inventário:
-
-- ignora registros completamente vazios;
-- converte DriverDate para yyyy-MM-dd;
-- agrupa entradas idênticas;
-- inclui Count para representar instâncias repetidas;
-- marca a visualização como drivers para a UI usar tabela específica.
-
-A apresentação mostra Dispositivo, Fabricante, Versão, Data, Assinado, INF e Quantidade, além de resumo.
+Inventário de drivers normaliza datas, agrupa registros equivalentes e mostra assinatura/INF/contagem.
 
 ## Inicialização / Tarefas
 
-**startup.py** consulta Win32_StartupCommand, chaves Run e serviços automáticos parados.
+\`startup.py\`: startup commands, chaves Run e serviços automáticos parados.
 
-**tasks.py** lista tarefas, estado, última execução, próxima execução, resultado e falhas.
+\`tasks.py\`: tarefas agendadas, estado, última/próxima execução e falhas.
 
 ## Crashes / BSOD
 
-**crashes.py** coleta BugCheck, Minidump, MEMORY.DMP e Application Error/Windows Error Reporting.
-
-A Central localiza evidência; análise profunda de dump ainda pode exigir WinDbg.
+\`crashes.py\`: BugCheck, Minidump, MEMORY.DMP e Application Error/WER.
 
 ## Segurança
 
-**security.py** consulta Defender, proteção em tempo real, assinatura, Firewall, BitLocker, TPM, Secure Boot, RDP, SMBv1, UAC e ameaças recentes.
+\`security.py\`: Defender, Firewall, BitLocker, TPM, Secure Boot, RDP, SMBv1, UAC e ameaças.
 
-A Central não oferece botão genérico para desativar Defender/Firewall.
+A Central não fornece ação genérica para desligar controles de segurança.
 
 ## Rede
 
-**network.py**:
+\`network.py\`:
 
 - adaptadores;
 - IP/gateway/DNS;
 - DHCP;
+- ARP;
+- conexões;
 - flush DNS;
 - renovação DHCP;
-- reset Winsock/TCP-IP nas rotinas existentes;
-- Wi-Fi;
-- ARP;
-- conexões TCP;
-- teste TCP.
+- resets existentes.
+
+Mutações de rede usam o caminho seguro de execução mutável.
 
 ## Usuários / Perfis
 
-**users_profiles.py** consulta administradores locais, perfis, SID, último uso e tamanho. Remoções, quando expostas, são destrutivas e exigem validação forte.
+\`users_profiles.py\` consulta administradores locais, perfis, SID, último uso e tamanho.
 
-## Software
+Ações destrutivas devem exigir validação/confirmar alvo e nunca ser generalizadas em lote sem controle.
 
-**software.py**:
+## Software / Winget
+
+\`software.py\`:
 
 - inventário por registro;
 - disponibilidade do Winget;
-- operações pelo catálogo configurado.
+- install/upgrade/uninstall pelo catálogo permitido.
 
-Winget pode ter comportamento diferente sob PsExec/SYSTEM.
+Operações Winget verificam \`$LASTEXITCODE\`.
 
 ## GLPI Agent
 
-**glpi.py**:
+\`glpi.py\`:
 
 - status;
+- cópia de instalador homologado;
 - instalação/reparo;
 - reinício de serviço;
 - inventário forçado;
 - log recente.
 
-installer_source deve ficar em settings.local.json quando contiver infraestrutura interna.
+## GLPI API
+
+\`integrations/glpi/client.py\` encapsula sessão, erros HTTP/rede, JSON e follow-up de ticket.
 
 ## Impressoras
 
-**printers.py**:
+\`printers.py\`:
 
 - inventário;
-- filas;
-- reinício do Spooler;
-- limpeza de jobs.
+- fila;
+- status do Spooler;
+- reinício;
+- limpeza de fila.
 
-Limpeza de fila remove documentos pendentes.
+A remediação guiada de Spooler valida estado Running depois da ação.
 
 ## Domínio / GPO
 
-**domain.py**:
+\`domain.py\`:
 
-- domínio/membership;
+- status de domínio;
 - DC;
-- Test-ComputerSecureChannel;
-- w32tm;
+- secure channel;
+- horário;
 - gpresult;
-- reparo de secure channel;
-- gpupdate.
+- gpupdate;
+- repair de secure channel.
 
-## Disco e limpeza
+## Disco
 
-**disk.py**:
+\`disk.py\`:
 
 - uso do C:;
-- tamanho de perfis;
+- perfis por tamanho;
 - estimativa de limpeza;
-- limpeza segura de temporários e lixeira.
+- limpeza segura.
 
-Downloads não são removidos automaticamente.
+A limpeza segura atua em \`%TEMP%\` e \`%SystemRoot%\Temp\`; **não toca Lixeira, Downloads ou cache do Windows Update**.
 
 ## Armazenamento / Bateria
 
-**storage.py** usa Get-PhysicalDisk e classes WMI/CIM de bateria quando disponíveis.
-
-Nem todo firmware/controlador expõe saúde detalhada.
+\`storage.py\` consulta Get-PhysicalDisk e WMI/CIM de bateria quando disponíveis.
 
 ## Ferramentas avançadas
 
-**workstation_tools.py**:
-
-- certificados;
-- unidades mapeadas;
-- shares locais;
-- proxy;
-- ativação/licenciamento;
-- logons recentes.
+\`workstation_tools.py\` consulta certificados, unidades mapeadas, shares, proxy, ativação e logons.
 
 ## Sysinternals
 
-**sysinternals.py** integra:
+\`sysinternals.py\`: Autorunsc, ProcDump, Handle e Sigcheck.
 
-- Autorunsc;
-- ProcDump;
-- Handle;
-- Sigcheck.
-
-A Central não baixa a suíte automaticamente.
+Não há download automático.
 
 ## Sistema
 
-**system.py**:
+\`system.py\`:
 
 - sessões;
 - processos;
 - serviços;
-- start/stop/restart;
 - GPUpdate;
-- mensagem ao usuário;
-- restart;
-- shutdown;
-- abort shutdown.
+- mensagens;
+- restart/shutdown/abort.
 
-Ações de energia, kill de processo e parada de serviço são potencialmente disruptivas.
+Ações de energia e mudança de serviço são classificadas como mutações/disruptivas.
 
 ## Windows Update
 
-**updates.py**:
+\`updates.py\`:
 
 - status/histórico;
 - pendências;
 - scan;
-- reset de componentes.
+- reset transacional de componentes.
 
-## Pacote de diagnóstico
+No reset, \`SoftwareDistribution\` e \`catroot2\` são renomeados com timestamp e serviços originalmente ativos são restaurados em bloco \`finally\`.
 
-**diagnostic_package.py** agrega evidências para análise/escalonamento. Pacotes podem conter dados internos e não devem ser versionados.
+## Pacote diagnóstico
 
-## Jobs
+\`diagnostic_package.py\` agrega evidências para escalonamento.
 
-**core/jobs.py** organiza execução, estado, concorrência e serialização de mutações por host.
+Pacotes são dados operacionais; não versionar.
+
+## Conectividade
+
+\`core/connectivity.py\` avalia DNS, ping, 445, 5985, 5986, WinRM autenticado, ADMIN$ e PsExec real.
+
+## Executor
+
+\`core/executor.py\` concentra semântica de transporte e fallback seguro.
+
+Use APIs mutáveis para qualquer ação que altere o host.
+
+## Jobs / Batch
+
+\`core/jobs.py\` é o scheduler central.
+
+\`modules/batch.py\` pode reutilizar esse mesmo scheduler, evitando pools paralelos independentes.
 
 ## Diagnóstico / Correlação
 
-**diagnostics/** normaliza Finding e Diagnosis e correlaciona sinais como pressão de armazenamento, degradação de storage, pressão de recursos, postura de segurança e falha do GLPI Agent.
+\`diagnostics/\` separa Finding de Diagnosis.
 
 ## Playbooks
 
-**playbooks/** define sequências de coleta orientadas por sintoma.
+\`playbooks/\` coleta evidências orientadas por sintoma. Não aplica remediação silenciosa.
 
 ## Remediação
 
-**remediation/** executa ações com snapshot before/after quando configurado.
+\`remediation/\` executa before/action/after/validator.
+
+Validadores atuais: limpeza, Spooler, Windows Update e GPUpdate.
 
 ## Persistência
 
-**storage/database.py** persiste snapshots, jobs, findings, remediações e relatórios.
+\`storage/database.py\` usa migrations versionadas e persiste correlation_id.
 
-## Apresentação de resultados
+## Relatórios
 
-A UI usa tabelas para listas de objetos quando possível. O JSON bruto fica reservado a estruturas complexas sem visualização específica.
-
-A camada PsExec filtra ruído operacional em execuções bem-sucedidas sem esconder erro real.
+\`reports/\` gera Markdown, JSON e TXT; nomes de arquivos são sanitizados.

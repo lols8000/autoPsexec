@@ -1,111 +1,126 @@
-# Segurança — Central N2 Workstation v5
+# Segurança — Central N2 Workstation 5.1.0
 
 ## Modelo de confiança
 
-A Central é ferramenta administrativa privilegiada. Pressupõe operador autorizado, estação administrativa confiável, rede permitida e hosts autorizados.
+A Central é ferramenta administrativa privilegiada para operação autorizada em estações Windows.
 
-## UAC
+Pressupostos:
 
-main.py solicita elevação quando necessário.
+- operador autorizado;
+- estação administrativa confiável;
+- rede e hosts dentro do escopo permitido;
+- credenciais tratadas pela política corporativa;
+- PsExec/Sysinternals homologados quando utilizados.
+
+## Elevação
+
+\`main.py\` solicita UAC quando necessário. A Central não contorna a política de elevação do Windows.
 
 ## Segredos
 
-Não persistir em código público:
+Nunca versione:
 
-- senha;
-- token;
-- API key;
-- Authorization;
-- chaves privadas;
-- credenciais de domínio.
-
-Use settings.local.json para configuração privada.
-
-## Repositório público
-
-Não commitar:
-
-- IPs internos desnecessários;
-- inventários reais;
-- nomes de usuários;
-- logs;
-- relatórios;
+- senhas;
 - tokens;
-- paths sensíveis.
+- API keys;
+- Authorization headers;
+- certificados privados;
+- credenciais de domínio;
+- URLs internas sensíveis.
+
+Use \`settings.local.json\`, que não deve ser commitado.
+
+## Auditoria e redaction
+
+O logger aplica redaction em nomes/valores sensíveis e é compacto por padrão.
+
+\`logging.verbose_payloads=false\` evita persistir command/stdout/data completos em cada resultado. Habilite payload verboso somente quando houver necessidade operacional e proteção adequada do diretório de logs.
 
 ## WinRM
 
-Use conforme política corporativa. Evite TrustedHosts=* e desabilitação de controles apenas para “fazer funcionar”.
+A Central não considera WinRM pronto apenas porque \`Test-WSMan\` respondeu. O preflight também valida \`Invoke-Command\`.
+
+Evite:
+
+- \`TrustedHosts=*\`;
+- desabilitar Firewall/Defender para “fazer funcionar”;
+- habilitar listener fora da política corporativa.
 
 ## PsExec
 
-PsExec é fallback legítimo, mas deve ser homologado.
+PsExec é suportado, mas possui impacto administrativo relevante:
 
-Riscos/considerações:
-
-- depende de SMB/ADMIN$;
+- usa SMB/ADMIN$;
+- pode criar serviço remoto temporário;
 - pode ser bloqueado por EDR;
-- pode executar em contexto SYSTEM;
-- programas interativos podem mudar de comportamento;
-- Winget pode não estar disponível.
+- contexto SYSTEM pode diferir do usuário interativo;
+- aplicativos dependentes de perfil, como Winget, podem não estar disponíveis.
 
 A Central não baixa PsExec automaticamente.
 
-## Ruído de transporte
+## Fallback e idempotência
 
-A limpeza de Starting..., exit code 0 e CLIXML só ocorre em execução bem-sucedida. Em falha, mensagens são preservadas para diagnóstico.
+A regra de segurança mais importante da 5.1.0:
 
-## Ações destrutivas/disruptivas
+**consulta pode repetir; mutação não pode repetir cegamente.**
 
-Exemplos:
-
-- remoção de perfil;
-- kill de processo;
-- stop de serviço;
-- reset de rede;
-- limpeza de fila;
-- reboot/shutdown;
-- Component Store cleanup;
-- secure channel repair.
-
-Devem mostrar host, exigir confirmação quando aplicável, possuir timeout, retornar resultado e ser auditáveis.
-
-## Concorrência
-
-JobManager serializa mutações por host para evitar DISM + cleanup + reboot simultâneos.
-
-## Timeout
-
-Timeout não é cancelamento remoto garantido.
-
-## Auditoria
-
-AuditLogger registra correlation_id e sanitiza campos sensíveis antes de persistir.
-
-## Persistência
-
-SQLite, relatórios e logs contêm dados operacionais e devem ter ACL adequada.
-
-## Sysinternals
-
-Use pacote homologado. A Central não faz download silencioso.
-
-## GLPI API
-
-Tokens devem permanecer em settings.local.json. A API é desabilitada por padrão.
+Para mutações, fallback WinRM → PsExec só ocorre quando a falha é classificada como pré-execução. Quando a ação pode ter chegado ao destino, o resultado vira indeterminado e a repetição automática é bloqueada.
 
 ## Entrada do operador
 
-Evitar terminal remoto livre e concatenação de comando arbitrário sem validação. Preferir parâmetros estruturados e shell=False.
+Entradas interpoladas em PowerShell devem usar validadores/quoting centralizados. Não exponha shell remoto livre na UI.
+
+## Winget
+
+Operações do Winget verificam \`$LASTEXITCODE\`. Exit code não-zero deve aparecer como falha, mesmo que o PowerShell em si não tenha lançado exceção automaticamente.
+
+## Remediação
+
+Ações de escrita devem possuir:
+
+- \`ActionSpec\`;
+- classe de operação;
+- confirmação quando aplicável;
+- timeout;
+- resultado auditável;
+- validador pós-ação quando o estado final for verificável.
+
+## Concorrência
+
+O JobManager serializa operações não somente-leitura por host, evitando sobreposição como DISM + cleanup + reboot na mesma estação.
+
+## Persistência
+
+SQLite, relatórios e logs podem conter dados de infraestrutura. Proteja com ACL e política de retenção.
+
+O banco passa por \`quick_check\` na inicialização e usa migrations versionadas; não edite o schema manualmente em produção.
+
+## GLPI API
+
+Tokens ficam apenas em configuração local. A API é desabilitada por padrão.
+
+## Supply chain / distribuição
+
+- dependências de CI fixadas;
+- GitHub Actions fixadas por SHA;
+- UPX desativado;
+- release gera SHA256SUMS;
+- updater valida SHA-256 quando o asset publica digest;
+- download é promovido apenas após validação;
+- assinatura Authenticode pode ser aplicada pelo CI sem armazenar certificado no repositório.
+
+## Repositório público
+
+Não commite logs reais, dumps, relatórios, banco SQLite, nomes de usuários, inventários internos ou arquivos de configuração local.
 
 ## Incidente
 
-Em suspeita de abuso:
+Em suspeita de uso indevido:
 
-1. interromper uso;
-2. preservar logs;
-3. identificar estação administrativa;
-4. identificar alvos;
-5. revisar correlation_id/jobs;
-6. revisar credenciais;
-7. acionar segurança.
+1. interrompa a operação;
+2. preserve logs e banco;
+3. identifique \`correlation_id\`;
+4. identifique estação administrativa e alvos;
+5. revise jobs/remediações;
+6. revise credenciais;
+7. acione o processo corporativo de segurança.
