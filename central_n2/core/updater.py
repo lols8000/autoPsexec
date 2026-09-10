@@ -61,10 +61,14 @@ class SemVersion:
         for left, right in zip(self.prerelease, other.prerelease):
             if left == right:
                 continue
-            if isinstance(left, int) and isinstance(right, str):
-                return -1
-            if isinstance(left, str) and isinstance(right, int):
+            if isinstance(left, int):
+                if isinstance(right, str):
+                    return -1
+                return -1 if left < right else 1
+
+            if isinstance(right, int):
                 return 1
+
             return -1 if left < right else 1
 
         if len(self.prerelease) == len(other.prerelease):
@@ -205,11 +209,14 @@ class UpdateManager:
         self._validate_https(url)
 
         expected_size_raw = asset.get("size")
-        expected_size = (
-            int(expected_size_raw)
-            if expected_size_raw not in (None, "")
-            else None
-        )
+        expected_size: int | None = None
+        if expected_size_raw is not None and str(expected_size_raw).strip():
+            try:
+                expected_size = int(str(expected_size_raw))
+            except ValueError as exc:
+                raise ValueError(
+                    "Tamanho publicado do asset é inválido."
+                ) from exc
         if expected_size is not None and expected_size < 0:
             raise ValueError("Tamanho publicado do asset é inválido.")
 
