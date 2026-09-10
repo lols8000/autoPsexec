@@ -1,198 +1,146 @@
-# Central N2 Workstation v5 — arquitetura consolidada
+# Central N2 Workstation 5.1.0 — arquitetura consolidada
 
-A v5 transforma o autoPsexec histórico em uma plataforma modular de troubleshooting para workstations Windows.
+A 5.1 transforma a evolução histórica do autoPsexec em uma plataforma de suporte N2 com contrato explícito de transporte, estado, segurança de mutação, diagnóstico, validação e rastreabilidade.
 
 ## Fluxo
 
-~~~text
+\`\`\`text
 Alvo
  ↓
 HostIdentity
+ ↓
+ConnectivityDiagnostics
  ↓
 TransportManager
  ↓
 Local / WinRM / PsExec
  ↓
-Session + Connectivity + Capabilities
+AttendanceContext + SessionManager
  ↓
-Snapshot
+JobManager
  ↓
-Findings
+Snapshot / Coleta
  ↓
-Correlação
+Evaluation + Finding
+ ↓
+Correlation / Diagnosis
  ↓
 Playbook
  ↓
-Remediação
+Remediation
  ↓
-Before / After
+Validação
  ↓
-Relatório / Histórico / GLPI
-~~~
+SQLite / Relatório / GLPI
+\`\`\`
 
-## Transportes
+## O que diferencia a 5.1
 
-- **Local:** usado quando o alvo é a própria máquina.
-- **WinRM:** preferido em destinos remotos quando utilizável.
-- **PsExec:** fallback quando WinRM não está disponível e o executável existe.
+### WinRM realmente validado
 
-WinRM não é obrigatório. Em redes onde 5985 está bloqueada, PsExec pode continuar operando por SMB/ADMIN$.
+\`Test-WSMan\` sozinho não basta. O preflight exige execução de \`Invoke-Command\`.
 
-O executor descobre PsExec pelo PATH e pelos caminhos C:\Windows\System32\PsExec.exe e C:\Sysinternals\PsExec.exe.
+### PsExec como transporte suportado
 
-## Saída humana
+5985 bloqueada não encerra o atendimento se 445, ADMIN$ e PsExec estiverem válidos.
 
-A interface v5 usa CommandResult.data para apresentar listas estruturadas em tabela quando possível.
+### Mutação sem dupla execução
 
-O parser de JSON é tolerante a ruído do transporte. Em execuções PsExec bem-sucedidas, a camada de transporte remove mensagens operacionais sem valor para o suporte, como:
+Leituras podem repetir por fallback. Mutações só repetem quando a falha é comprovadamente anterior à execução.
 
-- início do processo remoto;
-- encerramento com exit code 0;
-- envelope CLIXML emitido pelo Windows PowerShell.
+Se a entrega for incerta:
 
-Erros reais são preservados.
+\`\`\`text
+INDETERMINADO → validar estado → decidir
+\`\`\`
 
-O inventário de drivers agrupa entradas idênticas, normaliza datas, reduz registros vazios e apresenta assinatura em formato humano.
+### Estado único
 
-## Runtime e concorrência
+Dados do atendimento ficam em \`AttendanceContext\`, eliminando mirrors paralelos de sessão/diagnóstico/remediação/relatório.
 
-JobManager mantém pool configurável. Leituras podem ser concorrentes; mutações por host são serializadas para evitar operações incompatíveis na mesma estação.
+### Scheduler único
 
-Estados de job:
+\`JobManager\` controla concorrência, heartbeat e serialização por host.
 
-- QUEUED
-- RUNNING
-- SUCCESS
-- FAILED
-- TIMEOUT
-- CANCELLED
+### Avaliação explícita
 
-Timeout local não significa necessariamente cancelamento do processo remoto.
+PASS, FAIL, UNKNOWN e N/A têm significados distintos.
 
-## Sessões
+### Remediação validada
 
-SessionManager mantém contexto lógico reutilizável por host: transporte, conectividade e capabilities. Não é um PSSession persistente do PowerShell.
+Ação concluída não é sinônimo de problema resolvido. Remediações possuem probes e validadores específicos.
 
-## Capabilities
+### Persistência evolutiva
 
-A Central detecta:
+SQLite usa migrations e \`PRAGMA user_version\`, com schema atual 2.
 
-- versão do PowerShell;
-- Windows/build;
-- Winget;
-- Defender;
-- BitLocker;
-- TPM;
-- Secure Boot;
-- Get-PhysicalDisk;
-- bateria;
-- GLPI.
+### Distribuição endurecida
 
-Menus podem evitar consultas sem sentido, por exemplo bateria em desktop ou Winget ausente.
+- SemVer;
+- download temporário;
+- validação de tamanho;
+- SHA-256 quando publicado;
+- rename atômico;
+- UPX desativado;
+- hashes de release;
+- assinatura opcional;
+- CI fixado e reprodutível.
 
-## Diagnóstico e playbooks
+## Playbooks
 
-O motor separa fatos (Finding) de hipóteses (Diagnosis).
-
-Playbooks disponíveis:
-
-- computador lento;
+- lentidão;
 - rede;
 - impressão;
 - domínio/GPO;
 - Windows Update;
-- crash de aplicação;
+- crash;
 - BSOD;
 - disco cheio;
 - GLPI Agent.
 
-## Remediação
+Playbook é coleta orientada, não automação de remediação.
 
-RemediationEngine executa:
-
-~~~text
-snapshot antes
- ↓
-ação
- ↓
-snapshot depois
- ↓
-diff
-~~~
-
-Remediações guiadas atuais:
+## Remediações guiadas
 
 - limpeza segura;
-- reiniciar Spooler;
+- reinício de Spooler;
 - reset de Windows Update;
 - GPUpdate /force.
 
-## Persistência
-
-SQLite em data/central_n2.db mantém:
-
-- hosts;
-- snapshots;
-- findings;
-- remediações;
-- jobs;
-- relatórios.
-
-O Diff compara snapshots recursivamente.
+Estados de validação: PASS, FAIL, UNKNOWN.
 
 ## Baselines
-
-Perfis:
 
 - DEFAULT;
 - DESKTOP;
 - NOTEBOOK;
 - TI.
 
-O compliance pode exigir disco livre, uptime, Defender, Firewall, GLPI, ausência de reboot pendente, BitLocker, TPM e Secure Boot.
-
-## GLPI
-
-settings.local.json é o local de configuração privada.
-
-A API fica desabilitada por padrão. Quando habilitada, a Central pode enviar o relatório gerado como acompanhamento do chamado.
-
-## Auditoria
-
-Eventos podem carregar correlation_id. O logger mascara campos sensíveis como senha, token, Authorization, Bearer e API key.
+Controles opcionais não exigidos aparecem como N/A.
 
 ## Interfaces
 
-Console:
+Console é a interface operacional principal.
 
-~~~powershell
-python .\main.py
-~~~
+A GUI Tkinter usa o modelo compartilhado de jobs para não manter um scheduler paralelo de execução.
 
-GUI:
+## Compatibilidade histórica
 
-~~~powershell
-python .\main.py --gui
-~~~
+Arquivos antigos permanecem no repositório para referência, mas não definem a arquitetura da 5.1.
 
-A GUI usa worker thread e não deve bloquear a janela durante operações remotas.
+\`ConsoleUIV5\` herda \`ConsoleBase\`, não \`ConsoleUIV3\`.
 
-## Distribuição
+## Definition of Done 5.1
 
-- PyInstaller gera pacote portátil;
-- Inno Setup gera instalador;
-- workflow Windows executa compileall, pytest, build portátil e smoke do instalador;
-- tags v* acionam workflow de release.
+Uma mudança está pronta quando:
 
-## Definition of Done
-
-Novo recurso deve ter:
-
-- tratamento de erro;
-- timeout;
-- retorno visual;
-- resultado estruturado quando aplicável;
-- logging;
-- teste;
-- documentação;
-- comportamento compreensível para o técnico.
+\`\`\`text
+contrato correto
++ segurança de execução
++ resultado observável
++ teste
++ lint/type/coverage
++ build
++ documentação
++ revisão de segredo
+\`\`\`
