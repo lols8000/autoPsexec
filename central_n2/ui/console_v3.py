@@ -186,6 +186,10 @@ class ConsoleUIV3:
         if result.stderr:
             label = "Erro" if not result.success else "Aviso"
             print(f"\n{label}: {result.stderr}")
+        if result.indeterminate:
+            reason = result.metadata.get("indeterminate_reason") or "resultado remoto não confirmado"
+            print(f"\n⚠ RESULTADO INDETERMINADO: {reason}")
+            print("Valide o estado da estação antes de repetir a ação.")
 
     def execute(self, label: str, func: Callable[[], CommandResult], *, timeout: int | None = None) -> CommandResult | None:
         print(f"\n▶ {label}")
