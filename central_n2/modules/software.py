@@ -24,7 +24,7 @@ class SoftwareModule:
         return self.settings.get("software", {})
 
     def list_installed(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $paths = @(
     'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
@@ -37,7 +37,7 @@ Get-ItemProperty $paths -ErrorAction SilentlyContinue |
         return self.executor.execute_powershell_json(host, script, timeout=120)
 
     def winget_available(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $cmd = Get-Command winget.exe -ErrorAction SilentlyContinue
 [pscustomobject]@{
     Available = [bool]$cmd
