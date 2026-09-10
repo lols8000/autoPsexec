@@ -1,16 +1,92 @@
 from __future__ import annotations
-from .base import PlaybookSpec,PlaybookStep
-def _s(k,l): return PlaybookStep(k,l)
-def builtin_playbooks():
-    specs=(
-      PlaybookSpec("slow","Computador lento",(_s("health","Saúde geral"),_s("performance","Performance"),_s("disk","Disco"),_s("processes","Processos"),_s("startup","Inicialização"))),
-      PlaybookSpec("network","Sem internet / rede",(_s("network","IP/DNS/Gateway"),_s("adapters","Adaptadores"),_s("connections","Conexões TCP"),_s("proxy","Proxy"))),
-      PlaybookSpec("printer","Não imprime",(_s("printers","Impressoras"),_s("print_queue","Fila"),_s("services","Serviços"))),
-      PlaybookSpec("domain","Problema de domínio / GPO",(_s("domain","Domínio"),_s("gpresult","GPResult"))),
-      PlaybookSpec("update","Windows Update",(_s("updates","Windows Update"),_s("health","Saúde"))),
-      PlaybookSpec("crash","Aplicativo fechando",(_s("app_crashes","Crashes"),_s("processes","Processos"))),
-      PlaybookSpec("bsod","Tela azul / BSOD",(_s("bsod","BugChecks/dumps"),_s("devices","Dispositivos"))),
-      PlaybookSpec("disk","Disco cheio",(_s("disk","Espaço"),_s("profiles","Perfis"),_s("cleanup_estimate","Estimativa limpeza"))),
-      PlaybookSpec("glpi","GLPI Agent",(_s("glpi","Status"),_s("glpi_log","Log recente"))),
+
+from .base import PlaybookSpec, PlaybookStep
+
+
+def _step(key: str, label: str) -> PlaybookStep:
+    return PlaybookStep(key, label)
+
+
+def builtin_playbooks() -> dict[str, PlaybookSpec]:
+    specs = (
+        PlaybookSpec(
+            "slow",
+            "Computador lento",
+            (
+                _step("health", "Saúde geral"),
+                _step("performance", "Performance"),
+                _step("disk", "Disco"),
+                _step("processes", "Processos"),
+                _step("startup", "Inicialização"),
+            ),
+        ),
+        PlaybookSpec(
+            "network",
+            "Sem internet / rede",
+            (
+                _step("network", "IP/DNS/Gateway"),
+                _step("adapters", "Adaptadores"),
+                _step("connections", "Conexões TCP"),
+                _step("proxy", "Proxy"),
+            ),
+        ),
+        PlaybookSpec(
+            "printer",
+            "Não imprime",
+            (
+                _step("printers", "Impressoras"),
+                _step("print_queue", "Fila"),
+                _step("services", "Serviços"),
+            ),
+        ),
+        PlaybookSpec(
+            "domain",
+            "Problema de domínio / GPO",
+            (
+                _step("domain", "Domínio"),
+                _step("gpresult", "GPResult"),
+            ),
+        ),
+        PlaybookSpec(
+            "update",
+            "Windows Update",
+            (
+                _step("updates", "Windows Update"),
+                _step("health", "Saúde"),
+            ),
+        ),
+        PlaybookSpec(
+            "crash",
+            "Aplicativo fechando",
+            (
+                _step("app_crashes", "Crashes"),
+                _step("processes", "Processos"),
+            ),
+        ),
+        PlaybookSpec(
+            "bsod",
+            "Tela azul / BSOD",
+            (
+                _step("bsod", "BugChecks/dumps"),
+                _step("devices", "Dispositivos"),
+            ),
+        ),
+        PlaybookSpec(
+            "disk",
+            "Disco cheio",
+            (
+                _step("disk", "Espaço"),
+                _step("profiles", "Perfis"),
+                _step("cleanup_estimate", "Estimativa limpeza"),
+            ),
+        ),
+        PlaybookSpec(
+            "glpi",
+            "GLPI Agent",
+            (
+                _step("glpi", "Status"),
+                _step("glpi_log", "Log recente"),
+            ),
+        ),
     )
-    return {x.key:x for x in specs}
+    return {spec.key: spec for spec in specs}
