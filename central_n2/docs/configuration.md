@@ -1,24 +1,24 @@
-# Configuração — Central N2 Workstation v5
+# Configuração — Central N2 Workstation 5.1.0
 
-## Arquivos
+## Princípio
 
-Base pública:
+A configuração efetiva é composta por:
 
-~~~text
-central_n2\config\settings.json
-~~~
+\`\`\`text
+config/settings.json
+        +
+config/settings.local.json (opcional, não versionado)
+        ↓
+merge recursivo
+        ↓
+configuração carregada uma única vez no bootstrap
+\`\`\`
 
-Override local:
+Segredos e valores internos ficam somente em \`settings.local.json\`.
 
-~~~text
-central_n2\config\settings.local.json
-~~~
+## Configuração pública atual
 
-O ConfigLoader faz merge recursivo: chaves do arquivo local substituem apenas os valores correspondentes, preservando o restante da configuração pública.
-
-## Exemplo atual
-
-~~~json
+\`\`\`json
 {
   "timeout_seconds": 60,
   "psexec_path": "C:\\Windows\\System32\\PsExec.exe",
@@ -26,15 +26,29 @@ O ConfigLoader faz merge recursivo: chaves do arquivo local substituem apenas os
   "runtime": {
     "transport_cache_ttl_seconds": 120,
     "max_workers": 6,
-    "max_batch_workers": 5,
     "retry_attempts": 2,
     "retry_base_delay_seconds": 0.5
+  },
+  "glpi": {
+    "installer_source": "",
+    "remote_installer_path": "C:\\glpiagentinstall.vbs",
+    "service_names": ["glpi-agent", "GLPI-Agent"]
   },
   "glpi_api": {
     "enabled": false,
     "base_url": "",
     "app_token": "",
     "user_token": ""
+  },
+  "software": {
+    "chrome": {"name": "Google Chrome", "winget_id": "Google.Chrome"},
+    "firefox": {"name": "Mozilla Firefox", "winget_id": "Mozilla.Firefox"},
+    "7zip": {"name": "7-Zip", "winget_id": "7zip.7zip"},
+    "vnc": {"name": "UltraVNC", "winget_id": "uvncbvba.UltraVnc"}
+  },
+  "compliance": {
+    "profile": "DEFAULT",
+    "overrides": {}
   },
   "persistence": {
     "enabled": true,
@@ -43,125 +57,182 @@ O ConfigLoader faz merge recursivo: chaves do arquivo local substituem apenas os
   },
   "updates": {
     "enabled": true,
-    "repository": "lols8000/autoPsexec",
-    "channel": "stable"
+    "repository": "lols8000/autoPsexec"
+  },
+  "ui": {
+    "heartbeat_seconds": 0.2,
+    "long_operation_timeout_seconds": 3600
+  },
+  "logging": {
+    "verbose_payloads": false,
+    "max_error_chars": 4000
   }
 }
-~~~
+\`\`\`
 
-## PsExec
+## timeout_seconds
 
-psexec_path define o caminho preferencial. Se o caminho configurado não existir, o executor também tenta descobrir:
+Timeout padrão do \`RemoteExecutor\` para operações que não definem valor mais específico.
 
-~~~text
-PsExec.exe no PATH
-C:\Windows\System32\PsExec.exe
-C:\Sysinternals\PsExec.exe
-~~~
+Operações longas podem usar timeout próprio.
 
-Validação recomendada:
+## psexec_path
 
-~~~powershell
-Test-Path C:\Sysinternals\PsExec.exe
-Get-Command PsExec.exe -ErrorAction SilentlyContinue
-~~~
+Caminho preferencial para PsExec. Se não existir, a Central tenta descobrir:
 
-O diretório C:\Sysinternals é recomendado para manter a suíte separada do System32.
+- PsExec.exe no PATH;
+- \`C:\Windows\System32\PsExec.exe\`;
+- \`C:\Sysinternals\PsExec.exe\`.
 
-## Sysinternals
+Diretório recomendado: \`C:\Sysinternals\`.
 
-sysinternals_dir aponta para o diretório das ferramentas opcionais, como Autorunsc, ProcDump, Handle e Sigcheck.
+## sysinternals_dir
 
-## Runtime
+Diretório das ferramentas opcionais Autorunsc, ProcDump, Handle e Sigcheck.
 
-- transport_cache_ttl_seconds: tempo de cache da seleção de transporte;
-- max_workers: limite do JobManager;
-- max_batch_workers: limite para lote;
-- retry_attempts: tentativas de preflight/transporte para falhas transitórias;
-- retry_base_delay_seconds: backoff inicial.
+A Central não baixa Sysinternals automaticamente.
 
-Retry não deve ser usado para repetir cegamente remediações destrutivas.
+## runtime.transport_cache_ttl_seconds
 
-## GLPI Agent
+Tempo de cache da escolha de transporte por host. Mudanças de conectividade podem ser forçadas com refresh pelo preflight.
 
-A seção glpi configura instalador, caminho remoto e nomes possíveis do serviço.
+## runtime.max_workers
 
-Valores internos devem ficar em settings.local.json.
+Número máximo de workers do \`JobManager\` compartilhado.
 
-## GLPI API
+Não representa “quantidade de remediações simultâneas por host”: operações não somente-leitura continuam serializadas por estação.
 
-A API fica desabilitada por padrão.
+## runtime.retry_attempts / retry_base_delay_seconds
+
+Retry é destinado a falhas transitórias de transporte/preflight. Não deve ser interpretado como repetição automática de remediação.
+
+Mutações com resultado potencialmente entregue ao host são marcadas como indeterminadas e não recebem fallback cego.
+
+## glpi
+
+Configura o agente GLPI:
+
+- \`installer_source\`;
+- \`remote_installer_path\`;
+- nomes possíveis de serviço.
+
+Caminhos UNC internos devem ficar em \`settings.local.json\`.
+
+## glpi_api
+
+Desabilitada por padrão.
 
 Exemplo local:
 
-~~~json
+\`\`\`json
 {
   "glpi_api": {
     "enabled": true,
-    "base_url": "https://glpi.exemplo/api",
-    "app_token": "SEGREDO",
-    "user_token": "SEGREDO"
+    "base_url": "https://glpi.exemplo/apirest.php",
+    "app_token": "PREENCHA_LOCALMENTE",
+    "user_token": "PREENCHA_LOCALMENTE"
   }
 }
-~~~
+\`\`\`
 
-Nunca commite tokens.
+Nunca versione tokens.
 
-## Software / Winget
+## software
 
-A seção software define catálogo homologado por nome e winget_id.
+Catálogo permitido para operações Winget. Cada item possui nome amigável e \`winget_id\`.
 
-Winget pode não funcionar no mesmo contexto em PsExec/SYSTEM.
+Winget pode não existir no contexto SYSTEM/PsExec. Operações checam o exit code real do executável.
 
-## Compliance / Baseline
+## compliance.profile
 
-A configuração ativa um perfil e pode sobrescrever regras como:
+Perfis versionados:
 
-- min_disk_free_percent;
-- max_uptime_days;
-- defender_required;
-- firewall_required;
-- glpi_required;
-- pending_reboot_not_allowed.
+- DEFAULT;
+- DESKTOP;
+- NOTEBOOK;
+- TI.
 
-Perfis versionados: DEFAULT, DESKTOP, NOTEBOOK e TI.
+A seleção interativa de perfil não é sobrescrita pelo perfil default da configuração.
 
-## Persistência
+## compliance.overrides
 
-Quando habilitada, SQLite é criado no caminho configurado. Banco, WAL e relatórios operacionais não devem ser versionados.
+Overrides explícitos têm precedência sobre o arquivo do perfil.
 
-## Updates
+Exemplo:
 
-A seção updates define repositório e canal. A aplicação consulta releases e pode baixar artefatos, mas não se substitui silenciosamente.
+\`\`\`json
+{
+  "compliance": {
+    "profile": "TI",
+    "overrides": {
+      "max_uptime_days": 7,
+      "bitlocker_required": true
+    }
+  }
+}
+\`\`\`
 
-## UI
+Estados de avaliação:
 
-heartbeat_seconds controla feedback visual. long_operation_timeout_seconds controla timeout padrão de operações longas.
+- PASS;
+- FAIL;
+- UNKNOWN;
+- NOT_APPLICABLE.
 
-Timeout local não garante encerramento de processo remoto já iniciado.
+Controles não exigidos pelo baseline aparecem como N/A.
 
-## O que nunca colocar no arquivo público
+## persistence
 
-- senha;
-- token;
-- API key;
-- credencial de domínio;
-- segredo de proxy;
-- chave privada;
-- inventário real;
-- dados pessoais;
-- infraestrutura interna desnecessária.
+\`enabled\`: ativa SQLite.
 
-## Checklist
+\`database\`: caminho do banco, relativo à raiz de \`central_n2\` quando não absoluto.
 
-~~~text
-[ ] Python >= 3.10 ou pacote distribuído
-[ ] PsExec homologado, se necessário
-[ ] WinRM conforme política, se utilizado
-[ ] settings.local.json fora do Git
-[ ] Sysinternals homologado, se utilizado
-[ ] GLPI configurado localmente
-[ ] baseline aprovado
-[ ] persistência protegida
-[ ] testes em bancada
-~~~
+\`snapshot_retention_days\`: retenção aplicada na inicialização para snapshots, jobs, findings, remediações e relatórios.
+
+O schema é migrado automaticamente por versão. Não edite \`PRAGMA user_version\` manualmente.
+
+## updates
+
+\`enabled\`: habilita/desabilita o menu de consulta/download.
+
+\`repository\`: repositório GitHub usado para releases.
+
+Não há atualização silenciosa do executável.
+
+## ui
+
+\`heartbeat_seconds\`: frequência de feedback do runner.
+
+\`long_operation_timeout_seconds\`: timeout padrão para orquestrações longas da UI.
+
+## logging
+
+\`verbose_payloads=false\` é o padrão recomendado.
+
+\`max_error_chars\` limita erro persistido.
+
+Redaction continua sendo aplicada mesmo quando payload verboso é habilitado.
+
+## Exemplo local recomendado
+
+\`\`\`json
+{
+  "psexec_path": "C:\\Sysinternals\\PsExec.exe",
+  "glpi": {
+    "installer_source": "\\\\servidor\\share\\glpiagentinstall.vbs"
+  },
+  "glpi_api": {
+    "enabled": false,
+    "base_url": "https://glpi.exemplo/apirest.php",
+    "app_token": "PREENCHA_LOCALMENTE",
+    "user_token": "PREENCHA_LOCALMENTE"
+  },
+  "logging": {
+    "verbose_payloads": false
+  }
+}
+\`\`\`
+
+## Política
+
+Se uma chave pública não tiver efeito real em runtime, ela não deve permanecer em \`settings.json\`. Configuração não é documentação decorativa.
