@@ -370,6 +370,30 @@ class RemoteExecutor:
                 result.metadata["json_parse_error"] = True
         return result
 
+    def execute_mutating_powershell_json(
+        self,
+        host: str,
+        script: str,
+        *,
+        timeout: int | None = None,
+    ) -> CommandResult:
+        result = self.execute_powershell(
+            host,
+            f"$r=& {{ {script} }};$r|ConvertTo-Json -Depth 8 -Compress",
+            timeout=timeout,
+            fallback_mode="mutation",
+        )
+        if result.success and result.stdout.strip():
+            parsed = self._parse_json_output(result.stdout)
+            if parsed is not None:
+                result.data = parsed
+            else:
+                result.metadata["json_parse_error"] = True
+                result.mark_indeterminate(
+                    "A ação terminou, mas o resultado estruturado não pôde ser validado."
+                )
+        return result
+
     def execute_psexec(
         self,
         host: str,
