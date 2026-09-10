@@ -206,6 +206,7 @@ def test_v5_bootstrap_accepts_injected_settings_and_has_single_state(tmp_path: P
             "profile": "DEFAULT",
         },
         "updates": {
+            "enabled": False,
             "repository": "lols8000/autoPsexec",
         },
     }
@@ -224,6 +225,7 @@ def test_v5_bootstrap_accepts_injected_settings_and_has_single_state(tmp_path: P
         assert ui.context.playbook is None
         assert ui.context.remediation is None
         assert ui.context.report_path is None
+        assert ui.updates_enabled is False
 
         legacy_mirrors = {
             "current_session",
