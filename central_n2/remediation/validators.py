@@ -114,6 +114,13 @@ def validate_gpupdate(
             {"gpresult": after.stdout},
         )
 
+    if isinstance(after, dict) and after.get("_probe_success") is True:
+        return ValidationResult(
+            ValidationStatus.PASS,
+            "GPUpdate concluiu e GPResult foi coletado após a aplicação.",
+            {"gpresult": after.get("_stdout", "")},
+        )
+
     return ValidationResult(
         ValidationStatus.UNKNOWN,
         "GPUpdate concluiu, mas a validação por GPResult não foi obtida.",
