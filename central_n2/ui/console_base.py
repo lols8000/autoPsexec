@@ -11,7 +11,6 @@ from core.config import ConfigLoader
 from core.jobs import JobManager, OperationClass, ResponsiveJobRunner
 from core.result import CommandResult
 from core.validation import validate_host, validate_process_name, validate_windows_path
-from modules.compliance import evaluate_compliance
 from modules.crashes import CrashesModule
 from modules.devices import DevicesModule
 from modules.diagnostic_package import DiagnosticPackageModule
