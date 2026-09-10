@@ -52,7 +52,12 @@ def test_compliance_all_controls_pass():
     }
     report = evaluate_compliance(healthy_snapshot(), baseline)
     assert report["score"] == 100
-    assert report["compliant"] == report["total"]
+    assert report["failed"] == 0
+    assert report["unknown"] == 0
+    assert (
+        report["compliant"] + report["not_applicable"]
+        == report["total"]
+    )
 
 
 def test_compliance_detects_multiple_deviations():
@@ -72,6 +77,10 @@ def test_compliance_detects_multiple_deviations():
         "PendingReboot": True,
     })
     report = evaluate_compliance(data, baseline)
-    failed = [item["key"] for item in report["items"] if not item["compliant"]]
+    failed = [
+        item["key"]
+        for item in report["items"]
+        if item["state"] == "FAIL"
+    ]
     assert {"disk", "uptime", "defender", "pending_reboot"}.issubset(set(failed))
     assert report["score"] < 100
