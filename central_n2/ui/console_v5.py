@@ -70,8 +70,14 @@ class ConsoleUIV5(ConsoleBase):
         "[0] Sair",
     )
 
-    def __init__(self, executor, settings_path: Path) -> None:
-        settings = ConfigLoader(settings_path).settings
+    def __init__(
+        self,
+        executor,
+        settings_path: Path,
+        *,
+        settings: dict[str, Any] | None = None,
+    ) -> None:
+        settings = settings or ConfigLoader(settings_path).settings
         runtime = settings.get("runtime", {})
         ui = settings.get("ui", {})
 
@@ -126,15 +132,7 @@ class ConsoleUIV5(ConsoleBase):
         )
         self.update_dir = root / "updates"
 
-        self.current_session = None
         self.context = AttendanceContext.start()
-        self.correlation_id = self.context.correlation_id
-
-        # Compatibilidade interna durante a transição para AttendanceContext.
-        self.last_diagnoses: list[Any] = []
-        self.last_playbook = None
-        self.last_remediation = None
-        self.last_report_path: Path | None = None
 
     def _handlers(self) -> dict[str, Callable[[], None]]:
         return {
@@ -178,13 +176,13 @@ class ConsoleUIV5(ConsoleBase):
                 print("╚════════════════════════════════════════════════════╝")
 
                 transport = (
-                    self.current_session.transport
-                    if self.current_session
+                    self.context.session.transport
+                    if self.context.session
                     else "-"
                 )
                 state = (
-                    self.current_session.connectivity.get("state", "-")
-                    if self.current_session
+                    self.context.session.connectivity.get("state", "-")
+                    if self.context.session
                     else "-"
                 )
                 print(
@@ -217,7 +215,7 @@ class ConsoleUIV5(ConsoleBase):
     def _handle_ui_error(self, option: str, exc: Exception) -> None:
         logger = getattr(self.executor, "logger", None)
         if logger:
-            with logger.bind(correlation_id=self.correlation_id):
+            with logger.bind(correlation_id=self.context.correlation_id):
                 logger.log_event(
                     "ui_error",
                     self.host or "local-ui",
@@ -229,7 +227,7 @@ class ConsoleUIV5(ConsoleBase):
         print(
             f"\n✗ ERRO INTERNO: {type(exc).__name__}: {exc}"
         )
-        print(f"Correlation ID: {self.correlation_id}")
+        print(f"Correlation ID: {self.context.correlation_id}")
         print(
             "A operação foi encerrada, mas a Central continua disponível."
         )
@@ -237,13 +235,6 @@ class ConsoleUIV5(ConsoleBase):
 
     def _reset_attendance(self, host: str) -> None:
         self.context = AttendanceContext.start(host)
-        self.correlation_id = self.context.correlation_id
-        self.current_session = None
-        self.health_snapshot = None
-        self.last_diagnoses = []
-        self.last_playbook = None
-        self.last_remediation = None
-        self.last_report_path = None
 
     def select_host(self) -> None:
         self.clear()
@@ -269,14 +260,13 @@ class ConsoleUIV5(ConsoleBase):
                 timeout=180,
                 operation_class=OperationClass.READ_ONLY,
                 host=host,
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
             )
         except Exception as exc:
             print(f"\n✗ Falha no preflight: {exc}")
             self.pause()
             return
 
-        self.current_session = session
         self.context.session = session
 
         connectivity = session.connectivity
@@ -369,7 +359,7 @@ class ConsoleUIV5(ConsoleBase):
             if not logger:
                 return func()
             with logger.bind(
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
                 **context,
             ):
                 return func()
@@ -377,13 +367,12 @@ class ConsoleUIV5(ConsoleBase):
         return wrapped
 
     def _set_health_snapshot(self, data: dict[str, Any]) -> None:
-        self.health_snapshot = data
         self.context.health_snapshot = data
 
     def _persist_health(self, data: dict[str, Any]) -> None:
         findings = self.engine.evaluate(data, self._baseline())
         diagnoses = self.correlator.correlate(findings)
-        self.last_diagnoses = diagnoses
+        self.context.diagnoses = diagnoses
         self.context.diagnoses = list(diagnoses)
 
         if not self.db:
@@ -393,7 +382,7 @@ class ConsoleUIV5(ConsoleBase):
             self.host,
             data,
             kind="health",
-            correlation_id=self.correlation_id,
+            correlation_id=self.context.correlation_id,
         )
         for finding in findings:
             self.db.save_finding(
@@ -401,7 +390,7 @@ class ConsoleUIV5(ConsoleBase):
                 finding.id,
                 finding.severity.value,
                 asdict(finding),
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
             )
 
     def menu_health(self) -> None:
@@ -457,7 +446,7 @@ class ConsoleUIV5(ConsoleBase):
                     f"esperado {item['expected']} | {item['state']}"
                 )
 
-            for diagnosis in self.last_diagnoses:
+            for diagnosis in self.context.diagnoses:
                 print(
                     f" - {diagnosis.title} | "
                     f"confiança {diagnosis.confidence}: "
@@ -515,7 +504,7 @@ class ConsoleUIV5(ConsoleBase):
                     timeout=3600,
                     on_tick=lambda _: None,
                     host=self.host,
-                    correlation_id=self.correlation_id,
+                    correlation_id=self.context.correlation_id,
                 )
                 print()
                 self.show_result(result)
@@ -602,9 +591,9 @@ class ConsoleUIV5(ConsoleBase):
         self.pause()
 
     def _capability(self, key: str, default=None):
-        if not self.current_session:
+        if not self.context.session:
             return default
-        return self.current_session.capabilities.get(key, default)
+        return self.context.session.capabilities.get(key, default)
 
     def menu_storage(self) -> None:
         if not self.require_host():
@@ -764,9 +753,9 @@ class ConsoleUIV5(ConsoleBase):
                 timeout=180,
                 operation_class=OperationClass.READ_ONLY,
                 host=self.host,
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
             )
-            self.current_session = session
+            self.context.session = session
             self.context.session = session
             print(
                 json.dumps(
@@ -858,14 +847,13 @@ class ConsoleUIV5(ConsoleBase):
                 operation_class=operation_class,
                 timeout=self.long_timeout,
                 host=self.host,
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
             )
         except Exception as exc:
             print(f"✗ {type(exc).__name__}: {exc}")
             self.pause()
             return
 
-        self.last_playbook = execution
         self.context.playbook = execution
 
         for step in execution.steps:
@@ -880,8 +868,9 @@ class ConsoleUIV5(ConsoleBase):
             execution,
             policy=self._baseline(),
         )
-        self.last_diagnoses = self.correlator.correlate(findings)
-        self.context.diagnoses = list(self.last_diagnoses)
+        self.context.diagnoses = list(
+            self.correlator.correlate(findings)
+        )
 
         if not findings:
             print(
@@ -894,7 +883,7 @@ class ConsoleUIV5(ConsoleBase):
                 self.host,
                 asdict(execution),
                 kind=f"playbook:{spec.key}",
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
             )
             for finding in findings:
                 self.db.save_finding(
@@ -902,10 +891,10 @@ class ConsoleUIV5(ConsoleBase):
                     finding.id,
                     finding.severity.value,
                     asdict(finding),
-                    correlation_id=self.correlation_id,
+                    correlation_id=self.context.correlation_id,
                 )
 
-        for diagnosis in self.last_diagnoses:
+        for diagnosis in self.context.diagnoses:
             print(
                 f"- {diagnosis.title} ({diagnosis.confidence}): "
                 f"{diagnosis.rationale}"
@@ -954,7 +943,7 @@ class ConsoleUIV5(ConsoleBase):
         diagnosis = (
             "; ".join(
                 f"{item.title} ({item.confidence})"
-                for item in self.last_diagnoses
+                for item in self.context.diagnoses
             )
             or "Sem diagnóstico correlacionado registrado."
         )
@@ -962,16 +951,16 @@ class ConsoleUIV5(ConsoleBase):
         actions = (
             [
                 step["label"]
-                for step in self.last_playbook.steps
+                for step in self.context.playbook.steps
                 if step.get("success")
             ]
-            if self.last_playbook
+            if self.context.playbook
             else []
         )
 
-        validation: Any = self.health_snapshot
-        if self.last_remediation:
-            remediation = self.last_remediation
+        validation: Any = self.context.health_snapshot
+        if self.context.remediation:
+            remediation = self.context.remediation
             actions.append(
                 f"Remediação: {remediation.spec.title} — "
                 f"{remediation.validation.status.value}"
@@ -985,14 +974,14 @@ class ConsoleUIV5(ConsoleBase):
 
         report = self.report_builder.build(
             host=self.host,
-            user=(self.health_snapshot or {}).get("User"),
+            user=(self.context.health_snapshot or {}).get("User"),
             problem=problem,
             diagnosis=diagnosis,
             actions=actions,
             validation=validation,
             result="Diagnóstico/atendimento registrado",
         )
-        report["correlation_id"] = self.correlation_id
+        report["correlation_id"] = self.context.correlation_id
 
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         stem = f"{self.host}_{stamp}"
@@ -1007,7 +996,6 @@ class ConsoleUIV5(ConsoleBase):
             stem=stem,
         )
 
-        self.last_report_path = path
         self.context.report_path = path
 
         if self.db:
@@ -1016,7 +1004,7 @@ class ConsoleUIV5(ConsoleBase):
                 "markdown",
                 path.read_text(encoding="utf-8"),
                 path=str(path),
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
             )
 
         print(f"✓ Relatório: {path}")
@@ -1065,7 +1053,7 @@ class ConsoleUIV5(ConsoleBase):
                 timeout=30,
                 operation_class=OperationClass.READ_ONLY,
                 host="github-release",
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
             )
         except Exception as exc:
             print(f"Não foi possível consultar atualização: {exc}")
@@ -1116,7 +1104,7 @@ class ConsoleUIV5(ConsoleBase):
                 timeout=900,
                 operation_class=OperationClass.HEAVY_READ,
                 host="github-release",
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
             )
             print(f"✓ Download verificado: {path}")
             print(
@@ -1146,9 +1134,8 @@ class ConsoleUIV5(ConsoleBase):
 
         valid_report = (
             self.context.belongs_to(self.host)
-            and self.last_report_path
-            and self.context.report_path == self.last_report_path
-            and Path(self.last_report_path).exists()
+            and self.context.report_path is not None
+            and self.context.report_path.exists()
         )
         if not valid_report:
             print(
@@ -1168,13 +1155,13 @@ class ConsoleUIV5(ConsoleBase):
         try:
             client.add_ticket_followup(
                 int(ticket),
-                Path(self.last_report_path).read_text(
+                self.context.report_path.read_text(
                     encoding="utf-8"
                 ),
             )
             if logger:
                 with logger.bind(
-                    correlation_id=self.correlation_id
+                    correlation_id=self.context.correlation_id
                 ):
                     logger.log_event(
                         "glpi_ticket_followup",
@@ -1186,7 +1173,7 @@ class ConsoleUIV5(ConsoleBase):
         except GLPIError as exc:
             if logger:
                 with logger.bind(
-                    correlation_id=self.correlation_id
+                    correlation_id=self.context.correlation_id
                 ):
                     logger.log_event(
                         "glpi_ticket_followup",
@@ -1361,7 +1348,7 @@ class ConsoleUIV5(ConsoleBase):
                 operation_class=item["operation_class"],
                 timeout=self.long_timeout,
                 host=self.host,
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
             )
         except Exception as exc:
             print(
@@ -1371,7 +1358,6 @@ class ConsoleUIV5(ConsoleBase):
             self.pause()
             return
 
-        self.last_remediation = remediation
         self.context.remediation = remediation
 
         self.show_result(remediation.command_result)
@@ -1408,14 +1394,14 @@ class ConsoleUIV5(ConsoleBase):
                 spec.key,
                 validated,
                 asdict(remediation),
-                correlation_id=self.correlation_id,
+                correlation_id=self.context.correlation_id,
             )
             if isinstance(remediation.after, dict):
                 self.db.save_snapshot(
                     self.host,
                     remediation.after,
                     kind=f"after:{spec.key}",
-                    correlation_id=self.correlation_id,
+                    correlation_id=self.context.correlation_id,
                 )
 
         self.pause()
