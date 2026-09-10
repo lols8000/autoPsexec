@@ -98,3 +98,20 @@ def test_updater_removes_partial_file_on_digest_failure(
 
     assert not (tmp_path / "CentralN2.zip").exists()
     assert not list(tmp_path.glob("*.part"))
+
+
+def test_version_is_consistent_across_runtime_package_and_installer():
+    root = Path(__file__).resolve().parents[1]
+
+    runtime_text = (root / "core" / "version.py").read_text(encoding="utf-8")
+    version_file = (root / "VERSION").read_text(encoding="utf-8").strip()
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+    installer = (root / "installer" / "CentralN2.iss").read_text(encoding="utf-8")
+    version_info = (root / "version_info.txt").read_text(encoding="utf-8")
+
+    expected = "5.1.0"
+    assert f'__version__ = "{expected}"' in runtime_text
+    assert version_file == expected
+    assert f'version = "{expected}"' in pyproject
+    assert f'#define MyAppVersion "{expected}"' in installer
+    assert f"StringStruct('ProductVersion', '{expected}')" in version_info
