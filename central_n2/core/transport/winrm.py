@@ -42,15 +42,23 @@ class WinRMTransport(Transport):
         return result
 
     def test(self, host: str) -> CommandResult:
+        """Valida listener, autenticação e execução PowerShell remota."""
         safe = self._safe(host)
+        marker = "CENTRAL_N2_WINRM_OK"
         return self._run_ps(
             host,
             (
                 "$ErrorActionPreference='Stop'; "
-                f"Test-WSMan -ComputerName '{safe}' | Out-Null; 'OK'"
+                f"Test-WSMan -ComputerName '{safe}' | Out-Null; "
+                f"$r = Invoke-Command -ComputerName '{safe}' "
+                f"-ScriptBlock {{ '{marker}' }}; "
+                f"if ($r -ne '{marker}') {{ "
+                "throw 'WinRM respondeu, mas Invoke-Command não foi validado.' "
+                "}; "
+                f"'{marker}'"
             ),
             action="test_winrm",
-            timeout=15,
+            timeout=20,
         )
 
     def execute_powershell(
