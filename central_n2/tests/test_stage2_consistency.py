@@ -73,10 +73,41 @@ def test_selected_baseline_is_not_overridden_by_default_config(tmp_path: Path):
     assert effective["max_uptime_days"] == 14
 
 
-def test_explicit_baseline_override_wins():
-    # Arquivos reais do projeto não são necessários para validar precedência
-    # aqui; a regra foi coberta no teste anterior. Este caso valida a API.
-    assert {"x": 1} != {"x": 2}
+def test_explicit_baseline_override_wins(tmp_path: Path):
+    (tmp_path / "DEFAULT.json").write_text(
+        json.dumps(
+            {
+                "profile": "DEFAULT",
+                "min_disk_free_percent": 15,
+                "max_uptime_days": 30,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "TI.json").write_text(
+        json.dumps(
+            {
+                "profile": "TI",
+                "min_disk_free_percent": 20,
+                "max_uptime_days": 14,
+            }
+        ),
+        encoding="utf-8",
+    )
+    repo = BaselineRepository(tmp_path)
+
+    effective = repo.resolve(
+        "TI",
+        {
+            "profile": "TI",
+            "overrides": {
+                "max_uptime_days": 7,
+            },
+        },
+    )
+
+    assert effective["min_disk_free_percent"] == 20
+    assert effective["max_uptime_days"] == 7
 
 
 def test_diagnostic_engine_accepts_cpuaverage_key():
