@@ -114,7 +114,7 @@ class CentralN2TkApp:
     def _run(
         self,
         label: str,
-        function: Callable[[], Any],
+        function: Callable[[str], Any],
         *,
         operation_class: OperationClass = OperationClass.READ_ONLY,
     ) -> None:
@@ -128,7 +128,7 @@ class CentralN2TkApp:
         _, future = self.jobs.submit(
             host,
             label,
-            function,
+            lambda: function(host),
             operation_class=operation_class,
         )
 
@@ -169,23 +169,19 @@ class CentralN2TkApp:
         self.status.config(text=f"{label} — {state}")
 
     def connect(self) -> None:
-        host = self._target()
         self._run(
             "Preflight",
-            lambda: self.sessions.open(host, refresh=True),
+            lambda host: self.sessions.open(host, refresh=True),
         )
 
     def check_health(self) -> None:
-        host = self._target()
-
-        def collect() -> Any:
+        def collect(host: str) -> Any:
             result = self.health.snapshot(host)
             return result.data if result.success else result.stderr
 
         self._run("Saúde", collect)
 
     def slow_playbook(self) -> None:
-        host = self._target()
         spec = self.playbooks["slow"]
         collectors = {
             "health": self.health.snapshot,
@@ -200,7 +196,7 @@ class CentralN2TkApp:
         }
         self._run(
             "Playbook Lentidão",
-            lambda: self.playbook_runner.run(
+            lambda host: self.playbook_runner.run(
                 spec,
                 host,
                 collectors,
