@@ -18,6 +18,13 @@ from core.validation import validate_host
 from core.version import __version__
 from diagnostics.correlation import CorrelationEngine
 from diagnostics.engine import DiagnosticEngine
+from execution import (
+    ExecutionDependencies,
+    ExecutionEngine,
+    ParameterKind,
+    RiskLevel,
+    build_execution_registry,
+)
 from integrations.glpi.client import GLPIClient, GLPIError
 from modules.compliance import evaluate_compliance
 from modules.health import calculate_health_score
@@ -67,6 +74,7 @@ class ConsoleUIV5(ConsoleBase):
         "[25] GLPI API",
         "[26] Remediações guiadas",
         "[27] Perfil / Baseline",
+        "[28] Central de Execuções",
         "[0] Sair",
     )
 
@@ -122,6 +130,30 @@ class ConsoleUIV5(ConsoleBase):
         self.playbook_analyzer = PlaybookAnalyzer(self.engine)
         self.playbooks = builtin_playbooks()
         self.remediation_engine = RemediationEngine()
+        self.execution_registry = build_execution_registry(
+            ExecutionDependencies(
+                system=self.system,
+                network=self.network,
+                software=self.software,
+                printers=self.printers,
+                devices=self.devices,
+                domain=self.domain,
+                users=self.users,
+                disk=self.disk,
+                glpi=self.glpi,
+                security=self.security,
+                updates=self.updates,
+                repair=self.repair,
+                packages=self.packages,
+                certificates=self.certificates,
+                registry_actions=self.registry_actions,
+                files=self.file_ops,
+            )
+        )
+        self.execution_engine = ExecutionEngine(
+            self.execution_registry,
+            remediation_engine=self.remediation_engine,
+        )
         self.report_builder = SupportReportBuilder()
         self.report_exporter = ReportExporter(root / "reports" / "support")
 
@@ -166,6 +198,7 @@ class ConsoleUIV5(ConsoleBase):
             "25": self.menu_glpi_api,
             "26": self.menu_remediations,
             "27": self.menu_baseline,
+            "28": self.menu_execution,
         }
 
     def run(self) -> None:
@@ -1412,6 +1445,297 @@ class ConsoleUIV5(ConsoleBase):
                     correlation_id=self.context.correlation_id,
                 )
 
+        self.pause()
+
+    @staticmethod
+    def _execution_evidence(value: Any) -> Any:
+        if isinstance(value, CommandResult):
+            if value.data is not None:
+                return value.data
+            return {
+                "success": value.success,
+                "transport": value.transport,
+                "stdout": value.stdout,
+                "stderr": value.stderr,
+                "indeterminate": value.indeterminate,
+            }
+        return value
+
+    def _prompt_execution_parameters(self, bound) -> dict[str, Any]:
+        raw: dict[str, Any] = {}
+        for parameter in bound.spec.parameters:
+            if parameter.help_text:
+                print(f"  ℹ {parameter.help_text}")
+
+            default_text = (
+                f" [padrão: {parameter.default}]"
+                if parameter.default is not None
+                else ""
+            )
+
+            if parameter.kind is ParameterKind.CHOICE:
+                print(f"\n{parameter.label}:")
+                for index, option in enumerate(parameter.choices, 1):
+                    print(f"  {index} - {option}")
+                choice = input(
+                    f"Escolha{default_text}: "
+                ).strip()
+                if not choice and parameter.default is not None:
+                    raw[parameter.key] = parameter.default
+                    continue
+                if choice.isdigit() and 1 <= int(choice) <= len(parameter.choices):
+                    raw[parameter.key] = parameter.choices[int(choice) - 1]
+                else:
+                    raw[parameter.key] = choice
+                continue
+
+            suffix = "" if parameter.required else " [opcional]"
+            value = input(
+                f"{parameter.label}{suffix}{default_text}: "
+            )
+            raw[parameter.key] = value
+
+        return raw
+
+    def _confirm_execution(self, bound) -> bool:
+        spec = bound.spec
+        strong = (
+            spec.risk in {RiskLevel.HIGH, RiskLevel.CRITICAL}
+            or spec.destructive
+            or spec.may_break_connectivity
+        )
+
+        if not spec.requires_confirmation:
+            return True
+
+        if not strong:
+            return self.confirm(
+                f"Executar {spec.title} em {self.host}?"
+            )
+
+        expected = f"EXECUTAR {self.host}"
+        print("\n⚠ CONFIRMAÇÃO REFORÇADA")
+        print(
+            f"Risco: {spec.risk.value} | "
+            f"Destrutiva: {'SIM' if spec.destructive else 'NÃO'} | "
+            f"Pode afetar conexão: "
+            f"{'SIM' if spec.may_break_connectivity else 'NÃO'}"
+        )
+        print(f"Impacto: {spec.impact}")
+        typed = input(
+            f"Digite exatamente '{expected}' para confirmar: "
+        ).strip()
+        return typed.casefold() == expected.casefold()
+
+    def _show_execution_action(self, bound) -> None:
+        spec = bound.spec
+        flags: list[str] = []
+        if spec.destructive:
+            flags.append("DESTRUTIVA")
+        if spec.requires_reboot:
+            flags.append("REBOOT")
+        if spec.may_break_connectivity:
+            flags.append("REDE")
+        flag_text = f" | {', '.join(flags)}" if flags else ""
+
+        print(f"\n=== {spec.title} ===")
+        print(
+            f"Categoria: {spec.category_label} | "
+            f"Risco: {spec.risk.value} | "
+            f"Classe: {spec.operation_class.value}{flag_text}"
+        )
+        print(f"Descrição: {spec.description}")
+        print(f"Impacto: {spec.impact}")
+        print(f"Timeout: {spec.timeout_seconds}s")
+        if spec.recommendation:
+            print(f"Recomendação: {spec.recommendation}")
+
+    def open_execution_category(self, category: str) -> None:
+        self.menu_execution(category=category)
+
+    def menu_execution(self, category: str | None = None) -> None:
+        if not self.require_host():
+            return
+
+        selected_category = category
+
+        if selected_category is None:
+            self.clear()
+            print("CENTRAL DE EXECUÇÕES")
+            print(
+                f"Alvo: {self.host} | "
+                f"Ações disponíveis: {len(self.execution_registry)}"
+            )
+            categories = self.execution_registry.categories()
+            for index, (key, label) in enumerate(categories, 1):
+                count = len(
+                    self.execution_registry.by_category(key)
+                )
+                print(f"{index} - {label} ({count})")
+            print("0 - Voltar")
+
+            option = input("Categoria: ").strip()
+            if (
+                option == "0"
+                or not option.isdigit()
+                or not 1 <= int(option) <= len(categories)
+            ):
+                return
+            selected_category = categories[int(option) - 1][0]
+
+        actions = self.execution_registry.by_category(
+            selected_category
+        )
+        if not actions:
+            print("Nenhuma ação disponível nesta categoria.")
+            self.pause()
+            return
+
+        self.clear()
+        label = actions[0].spec.category_label
+        print(f"EXECUÇÕES — {label}")
+        print(f"Alvo: {self.host}\n")
+
+        for index, bound in enumerate(actions, 1):
+            spec = bound.spec
+            flags = []
+            if spec.destructive:
+                flags.append("D")
+            if spec.requires_reboot:
+                flags.append("R")
+            if spec.may_break_connectivity:
+                flags.append("C")
+            suffix = f" [{' '.join(flags)}]" if flags else ""
+            print(
+                f"{index:2} - [{spec.risk.value:<8}] "
+                f"{spec.title}{suffix}"
+            )
+
+        print("\nD=destrutiva | R=reboot possível | C=conectividade")
+        print("0 - Voltar")
+        option = input("Ação: ").strip()
+        if (
+            option == "0"
+            or not option.isdigit()
+            or not 1 <= int(option) <= len(actions)
+        ):
+            return
+
+        bound = actions[int(option) - 1]
+        self._show_execution_action(bound)
+
+        try:
+            raw_parameters = self._prompt_execution_parameters(
+                bound
+            )
+            parsed = self.execution_engine.validate_parameters(
+                bound,
+                raw_parameters,
+            )
+        except ValueError as exc:
+            print(f"\n✗ Parâmetro inválido: {exc}")
+            self.pause()
+            return
+
+        if parsed:
+            print("\nParâmetros:")
+            sensitive = {
+                item.key
+                for item in bound.spec.parameters
+                if item.sensitive
+            }
+            for key, value in parsed.items():
+                visible = "***" if key in sensitive else value
+                print(f" - {key}: {visible}")
+
+        if not self._confirm_execution(bound):
+            print("Execução cancelada.")
+            self.pause()
+            return
+
+        try:
+            record = self.jobs.run(
+                f"Execução: {bound.spec.title}",
+                self._trace(
+                    lambda: self.execution_engine.execute(
+                        self.host,
+                        bound.spec.key,
+                        parsed,
+                    ),
+                    action=f"execution.{bound.spec.key}",
+                ),
+                operation_class=bound.spec.operation_class,
+                timeout=bound.spec.timeout_seconds,
+                host=self.host,
+                correlation_id=self.context.correlation_id,
+            )
+        except Exception as exc:
+            print(
+                f"\n✗ Execução falhou: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            self.pause()
+            return
+
+        remediation = record.remediation
+        self.context.remediation = remediation
+        self.show_result(remediation.command_result)
+
+        print(
+            f"\nVALIDAÇÃO: "
+            f"{remediation.validation.status.value} — "
+            f"{remediation.validation.message}"
+        )
+
+        before = self._execution_evidence(remediation.before)
+        after = self._execution_evidence(remediation.after)
+        print("\nANTES:")
+        print(
+            json.dumps(
+                before,
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            )
+            if before is not None
+            else "-"
+        )
+        print("\nDEPOIS:")
+        print(
+            json.dumps(
+                after,
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            )
+            if after is not None
+            else "-"
+        )
+
+        if self.db:
+            validated = (
+                remediation.validation.status
+                is ValidationStatus.PASS
+            )
+            self.db.save_remediation(
+                self.host,
+                bound.spec.key,
+                validated,
+                asdict(record),
+                correlation_id=self.context.correlation_id,
+            )
+            if isinstance(after, dict):
+                self.db.save_snapshot(
+                    self.host,
+                    after,
+                    kind=f"execution:{bound.spec.key}",
+                    correlation_id=self.context.correlation_id,
+                )
+
+        print(
+            f"\nCorrelation ID: "
+            f"{self.context.correlation_id}"
+        )
         self.pause()
 
     def menu_baseline(self) -> None:
