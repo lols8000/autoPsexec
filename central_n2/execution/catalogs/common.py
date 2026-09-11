@@ -282,6 +282,9 @@ def _register(
     before_probe=None,
     after_probe=None,
     validator=None,
+    preconditions=(),
+    rollback_handler=None,
+    rollback_validator=None,
 ) -> None:
     registry.register(
         BoundExecutionAction(
@@ -290,5 +293,8 @@ def _register(
             before_probe=before_probe,
             after_probe=after_probe,
             validator=validator,
+            preconditions=tuple(preconditions),
+            rollback_handler=rollback_handler,
+            rollback_validator=rollback_validator,
         )
     )
