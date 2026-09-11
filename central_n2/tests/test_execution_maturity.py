@@ -16,9 +16,11 @@ from execution import (
     ParameterKind,
     PrivilegeLevel,
     RecoveryResult,
+    RetryPolicy,
     RiskLevel,
 )
 from execution.config_validation import validate_execution_configuration
+from execution.policy import PolicyCheck, PolicyState
 from execution.validators import (
     command_completed,
     postcheck_succeeded,
@@ -488,3 +490,166 @@ def test_database_schema_v4_persists_rich_execution(tmp_path: Path):
     assert rows[0]["risk"] == "LOW"
     assert rows[0]["action_version"] == 1
     assert rows[0]["correlation_id"] == "CORR001"
+
+
+
+def test_custom_precondition_blocks_before_handler():
+    calls = 0
+
+    def handler(host, parameters):
+        nonlocal calls
+        calls += 1
+        return CommandResult(True, "x", host)
+
+    def precondition(context, parameters):
+        return [
+            PolicyCheck(
+                "custom.guard",
+                PolicyState.FAIL,
+                "Recurso em uso; ação bloqueada.",
+            )
+        ]
+
+    registry = ActionRegistry()
+    registry.register(
+        BoundExecutionAction(
+            spec=ExecutionAction(
+                key="guarded.test",
+                title="Guarded",
+                category="test",
+                category_label="Test",
+                description="Test.",
+                operation_class=OperationClass.HEAVY_WRITE,
+                risk=RiskLevel.HIGH,
+                impact="Test.",
+            ),
+            handler=handler,
+            preconditions=(precondition,),
+        )
+    )
+
+    engine = ExecutionEngine(registry)
+    plan = engine.plan(
+        "PC01",
+        "guarded.test",
+        {},
+        context=_context(),
+    )
+
+    assert plan.allowed is False
+    assert plan.policy.failures[0].key == "custom.guard"
+
+    try:
+        engine.execute(
+            "PC01",
+            "guarded.test",
+            {},
+            context=_context(),
+        )
+    except ExecutionBlockedError:
+        pass
+    else:
+        raise AssertionError("Precondition FAIL deveria bloquear a execução")
+
+    assert calls == 0
+
+
+def test_registry_rejects_safe_transient_for_non_idempotent_action():
+    registry = ActionRegistry()
+
+    try:
+        registry.register(
+            BoundExecutionAction(
+                spec=ExecutionAction(
+                    key="retry.invalid",
+                    title="Invalid retry",
+                    category="test",
+                    category_label="Test",
+                    description="Test.",
+                    operation_class=OperationClass.LIGHT_WRITE,
+                    risk=RiskLevel.LOW,
+                    impact="None.",
+                    retry_policy=RetryPolicy.SAFE_TRANSIENT,
+                    idempotent=False,
+                ),
+                handler=lambda host, params: CommandResult(
+                    True,
+                    "x",
+                    host,
+                ),
+            )
+        )
+    except ValueError as exc:
+        assert "SAFE_TRANSIENT" in str(exc)
+    else:
+        raise AssertionError(
+            "SAFE_TRANSIENT em ação não idempotente deveria falhar"
+        )
+
+
+def test_engine_never_auto_retries_indeterminate_mutation():
+    calls = 0
+
+    def handler(host, parameters):
+        nonlocal calls
+        calls += 1
+        return CommandResult.failure(
+            host,
+            "mutation",
+            "transport lost",
+            return_code=124,
+            transport="winrm",
+        ).mark_indeterminate("Entrega incerta.")
+
+    registry = ActionRegistry()
+    registry.register(
+        BoundExecutionAction(
+            spec=ExecutionAction(
+                key="retry.indeterminate",
+                title="Indeterminate",
+                category="test",
+                category_label="Test",
+                description="Test.",
+                operation_class=OperationClass.HEAVY_WRITE,
+                risk=RiskLevel.HIGH,
+                impact="Test.",
+                idempotent=True,
+                retry_policy=RetryPolicy.SAFE_TRANSIENT,
+            ),
+            handler=handler,
+            validator=command_completed,
+        )
+    )
+
+    record = ExecutionEngine(registry).execute(
+        "PC01",
+        "retry.indeterminate",
+        {},
+        context=_context(),
+    )
+
+    assert calls == 1
+    assert record.remediation.command_result.indeterminate is True
+    assert record.remediation.validation.status is ValidationStatus.UNKNOWN
+
+
+def test_database_redacts_legacy_execution_payload(tmp_path: Path):
+    database = CentralDatabase(tmp_path / "central.db")
+    database.save_execution(
+        "PC01",
+        "legacy.secret",
+        "PASS",
+        {
+            "token": "secret-token-value",
+            "nested": {"password": "secret-password"},
+        },
+        correlation_id="SECRET001",
+    )
+
+    row = database.recent_executions("PC01", limit=1)[0]
+    encoded = str(row["payload"])
+
+    assert "secret-token-value" not in encoded
+    assert "secret-password" not in encoded
+    assert row["payload"]["token"] == "***"
+    assert row["payload"]["nested"]["password"] == "***"
