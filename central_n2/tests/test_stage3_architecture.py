@@ -239,6 +239,7 @@ def test_v5_bootstrap_accepts_injected_settings_and_has_single_state(tmp_path: P
         assert ui.context.playbook is None
         assert ui.context.remediation is None
         assert ui.context.execution is None
+        assert ui.context.rollback_stack == []
         assert ui.context.report_path is None
         assert ui.updates_enabled is False
 
@@ -275,3 +276,18 @@ def test_database_persists_execution_history(tmp_path: Path):
     assert rows[0]["validation_state"] == "PASS"
     assert rows[0]["correlation_id"] == "EXEC001"
     assert rows[0]["payload"]["result"] == "ok"
+
+
+
+def test_attendance_context_clears_rollback_stack_when_host_changes():
+    from core.context import AttendanceContext
+
+    context = AttendanceContext.start("PC01", session=object())
+    context.rollback_stack.append(object())
+    context.execution = object()
+
+    context.bind("PC02", session=object())
+
+    assert context.host == "PC02"
+    assert context.execution is None
+    assert context.rollback_stack == []
