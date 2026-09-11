@@ -56,7 +56,7 @@ Padrão: `PRE_EXECUTION_ONLY`.
 
 `SAFE_TRANSIENT` só é válido para ação idempotente.
 
-Resultado indeterminado não sofre repetição automática cega.
+A Central respeita `retry_attempts` e `retry_delay_seconds`, mas só agenda nova tentativa quando a falha é comprovadamente pré-execução ou explicitamente marcada como segura. Resultado indeterminado nunca sofre repetição automática.
 
 ## Disconnect esperado
 
@@ -74,7 +74,7 @@ Rollback só é oferecido quando:
 - existe operação tecnicamente inversa;
 - after probe consegue validar restauração.
 
-A Central não simula rollback para ações irreversíveis.
+A Central não simula rollback para ações irreversíveis. Preconditions da reversão são independentes das preconditions da ida, evitando overwrite ou restauração sobre estado novo inesperado.
 
 ## Allowlist corporativa
 
@@ -108,7 +108,7 @@ Use `settings.local.json`.
 
 Parâmetros marcados `sensitive=True` são substituídos por `***`.
 
-Campos comuns como password/token/secret também passam pelo redactor central.
+Campos comuns como password/token/secret também passam pelo redactor central. O redactor percorre dataclasses, enums e coleções aninhadas, inclusive `CommandResult`.
 
 ## WinRM e PsExec
 
