@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.jobs import OperationClass
+
 from ..models import ExecutionAction, RiskLevel
 from .common import ExecutionDependencies, _defender_ready, _register
 
@@ -18,6 +19,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.LOW,
             "Baixo impacto; requer Defender disponível.",
             900,
+            required_capabilities=("Defender",),
+            tags=("defender", "assinatura", "signature", "update"),
         ),
         lambda host, p: deps.security.update_defender_signatures(host),
         after_probe=lambda host, p: deps.security.defender_status(host),
@@ -51,6 +54,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
                 risk,
                 "Pode consumir CPU/disco durante a varredura.",
                 timeout,
+                required_capabilities=("Defender",),
+                tags=("defender", "scan", scan_type.casefold()),
             ),
             lambda host, p, st=scan_type: deps.security.defender_scan(
                 host,
