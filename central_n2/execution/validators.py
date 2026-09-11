@@ -236,3 +236,59 @@ def after_field_matches_parameter(
         )
 
     return validate
+
+
+
+def postcheck_succeeded(
+    before: Any,
+    command: CommandResult,
+    after: Any,
+    parameters: dict[str, Any],
+) -> ValidationResult:
+    if command.indeterminate:
+        return ValidationResult(
+            ValidationStatus.UNKNOWN,
+            "A execução teve resultado indeterminado.",
+            after,
+        )
+
+    if isinstance(after, CommandResult):
+        if after.success:
+            return ValidationResult(
+                ValidationStatus.PASS,
+                "Postcheck executado com sucesso.",
+                after.data if after.data is not None else after.stdout,
+            )
+        return ValidationResult(
+            ValidationStatus.UNKNOWN if command.success else ValidationStatus.FAIL,
+            after.stderr or "Postcheck falhou.",
+            after.data,
+        )
+
+    if isinstance(after, dict):
+        probe_success = after.get("_probe_success")
+        if probe_success is True:
+            return ValidationResult(
+                ValidationStatus.PASS,
+                "Postcheck executado com sucesso.",
+                after,
+            )
+        if probe_success is False:
+            return ValidationResult(
+                ValidationStatus.UNKNOWN if command.success else ValidationStatus.FAIL,
+                str(after.get("_error") or "Postcheck não confirmou o estado."),
+                after,
+            )
+
+    if command.success:
+        return ValidationResult(
+            ValidationStatus.UNKNOWN,
+            "Comando concluiu, mas não houve evidência de postcheck suficiente.",
+            after,
+        )
+
+    return ValidationResult(
+        ValidationStatus.FAIL,
+        command.stderr or "Execução falhou.",
+        after,
+    )
