@@ -1980,7 +1980,11 @@ class ConsoleUIV5(ConsoleBase):
         return actions[int(option) - 1]
 
     def _rollback_last_execution(self) -> None:
-        record = self.context.execution
+        record = (
+            self.context.rollback_stack[-1]
+            if self.context.rollback_stack
+            else None
+        )
         if (
             record is None
             or not record.rollback_available
@@ -2042,6 +2046,11 @@ class ConsoleUIV5(ConsoleBase):
 
         if rollback.validation.status is ValidationStatus.PASS:
             record.rollback_available = False
+            if (
+                self.context.rollback_stack
+                and self.context.rollback_stack[-1] is record
+            ):
+                self.context.rollback_stack.pop()
 
         self.pause()
 
@@ -2122,6 +2131,8 @@ class ConsoleUIV5(ConsoleBase):
         remediation = record.remediation
         self.context.remediation = remediation
         self.context.execution = record
+        if record.rollback_available:
+            self.context.rollback_stack.append(record)
         self.show_result(remediation.command_result)
 
         if record.recovery is not None:
@@ -2240,9 +2251,9 @@ class ConsoleUIV5(ConsoleBase):
 
             print("B - Buscar ação")
             if (
-                self.context.execution is not None
-                and self.context.execution.rollback_available
-                and self.context.execution.rollback_result is None
+                bool(self.context.rollback_stack)
+                and self.context.rollback_stack[-1].rollback_available
+                and self.context.rollback_stack[-1].rollback_result is None
             ):
                 print("U - Desfazer última execução reversível")
             print("0 - Voltar")
