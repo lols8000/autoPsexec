@@ -1924,7 +1924,8 @@ class ConsoleUIV5(ConsoleBase):
         print(
             f"Transportes: {', '.join(spec.allowed_transports)} | "
             f"Idempotente: {'SIM' if spec.idempotent else 'NÃO'} | "
-            f"Retry: {spec.retry_policy.value}"
+            f"Retry: {spec.retry_policy.value} "
+            f"({spec.retry_attempts}x / {spec.retry_delay_seconds:.2f}s base)"
         )
         if spec.required_capabilities:
             print(
