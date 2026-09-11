@@ -1722,7 +1722,7 @@ class ConsoleUIV5(ConsoleBase):
         elif selector is SelectorKind.PROFILE:
             result = load(
                 "Carregando perfis",
-                lambda: self.users.profiles(self.host),
+                lambda: self.users.profile_inventory(self.host),
             )
             if isinstance(result, CommandResult) and result.success:
                 for item in self._list_payload(result):
@@ -1761,18 +1761,20 @@ class ConsoleUIV5(ConsoleBase):
         elif selector is SelectorKind.SESSION:
             result = load(
                 "Carregando sessões",
-                lambda: self.system.sessions(self.host),
+                lambda: self.system.session_inventory(self.host),
             )
             if isinstance(result, CommandResult) and result.success:
-                for line in result.stdout.splitlines()[1:]:
-                    values = re.findall(r"\b\d+\b", line)
-                    if not values:
+                for item in self._list_payload(result):
+                    session_id = item.get("SessionId")
+                    if session_id is None:
                         continue
-                    session_id = int(values[0])
                     options.append(
                         (
-                            session_id,
-                            re.sub(r"\s+", " ", line.strip()),
+                            int(session_id),
+                            (
+                                f"{item.get('UserName') or 'usuário não resolvido'} | "
+                                f"SessionId {session_id}"
+                            ),
                         )
                     )
 
