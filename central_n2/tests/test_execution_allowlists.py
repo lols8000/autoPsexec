@@ -4,6 +4,7 @@ from pathlib import Path
 
 from core.result import CommandResult
 from modules.certificates import CertificatesModule
+from modules.file_ops import FileOperationsModule
 from modules.packages import PackagesModule
 from modules.registry_actions import RegistryActionsModule
 
@@ -282,3 +283,61 @@ def test_registry_rollback_restores_original_value_kind():
     script = executor.commands[-1][2]
     assert "-PropertyType DWord" in script
     assert "-Value 1" in script
+
+
+
+def test_file_operations_reject_path_outside_allowed_roots():
+    executor = RecordingExecutor()
+    module = FileOperationsModule(
+        executor,
+        allowed_roots=[r"C:\CentralN2", r"C:\Temp"],
+    )
+
+    try:
+        module.remove_file(
+            "PC01",
+            r"C:\Windows\System32\kernel32.dll",
+        )
+    except ValueError as exc:
+        assert "fora das raízes permitidas" in str(exc)
+    else:
+        raise AssertionError("Caminho fora da allowlist deveria falhar")
+
+    assert executor.commands == []
+
+
+def test_file_operations_reject_parent_traversal():
+    executor = RecordingExecutor()
+    module = FileOperationsModule(
+        executor,
+        allowed_roots=[r"C:\CentralN2"],
+    )
+
+    try:
+        module.ensure_directory(
+            "PC01",
+            r"C:\CentralN2\..\Windows\Temp",
+        )
+    except ValueError as exc:
+        assert "'..'" in str(exc)
+    else:
+        raise AssertionError("Traversal deveria falhar")
+
+    assert executor.commands == []
+
+
+def test_file_operations_accept_scoped_path():
+    executor = RecordingExecutor()
+    module = FileOperationsModule(
+        executor,
+        allowed_roots=[r"C:\CentralN2"],
+    )
+
+    result = module.ensure_directory(
+        "PC01",
+        r"C:\CentralN2\Packages",
+    )
+
+    assert result.success is True
+    assert len(executor.commands) == 1
+    assert r"C:\CentralN2\Packages" in executor.commands[0][2]
