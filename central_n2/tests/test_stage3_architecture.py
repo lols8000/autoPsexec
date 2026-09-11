@@ -238,6 +238,7 @@ def test_v5_bootstrap_accepts_injected_settings_and_has_single_state(tmp_path: P
         assert ui.context.diagnoses == []
         assert ui.context.playbook is None
         assert ui.context.remediation is None
+        assert ui.context.execution is None
         assert ui.context.report_path is None
         assert ui.updates_enabled is False
 
