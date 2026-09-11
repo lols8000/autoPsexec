@@ -127,7 +127,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
             OperationClass.DISRUPTIVE,
             RiskLevel.HIGH,
             "Pode interromper a conectividade da estação por alguns segundos.",
-            360,
+            600,
             may_break_connectivity=True,
             disconnect_mode=DisconnectMode.TEMPORARY,
             recovery_timeout_seconds=180,
