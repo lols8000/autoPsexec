@@ -442,7 +442,7 @@ class CentralDatabase:
                     now,
                     finding_id,
                     severity,
-                    self._encode(payload),
+                    self._encode(redact(payload)),
                     correlation_id,
                 ),
             )
@@ -565,7 +565,7 @@ class CentralDatabase:
                     record.finished_at,
                     record.duration_ms,
                     record.action.risk.value,
-                    self._encode(record.public_parameters),
+                    self._encode(redact(record.public_parameters)),
                     int(record.rollback_available),
                     None,
                     0,
