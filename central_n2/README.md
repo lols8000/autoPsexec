@@ -1,158 +1,159 @@
-# Central N2 Workstation — Guia rápido 5.1.0
+# Central N2 Workstation — Guia rápido 5.2.0
 
-A Central N2 é uma plataforma de troubleshooting e remediação controlada para estações Windows. O fluxo operacional é:
+A Central N2 evoluiu de ferramenta de diagnóstico para uma plataforma operacional de suporte:
 
-\`\`\`text
-EVIDÊNCIA → DIAGNÓSTICO → REMEDIAÇÃO → VALIDAÇÃO → REGISTRO
-\`\`\`
+```text
+EVIDÊNCIA → DIAGNÓSTICO → PLANO → EXECUÇÃO → VALIDAÇÃO → REGISTRO
+```
 
-## Executar
+## Iniciar
 
-Da raiz do repositório:
-
-\`\`\`powershell
+```powershell
 python .\central_n2\main.py
-\`\`\`
+```
 
-GUI opcional:
+A aplicação solicita UAC quando necessário.
 
-\`\`\`powershell
-python .\central_n2\main.py --gui
-\`\`\`
+## Selecionar estação
 
-A aplicação solicita elevação UAC quando necessário.
+Use hostname/FQDN sempre que possível. O preflight produz uma sessão lógica com:
 
-## Transporte
+- conectividade;
+- transporte selecionado;
+- capabilities;
+- contexto de execução;
+- readiness administrativo.
 
-A seleção é automática:
+Estados principais: `READY_LOCAL`, `READY_WINRM` e `READY_PSEXEC`.
 
-\`\`\`text
-alvo local
-  → Local
+## Menu 28 — Central de Execuções
 
-alvo remoto
-  → WinRM autenticado e executável?
-      → SIM: WinRM
-      → NÃO: ADMIN$ + PsExec válidos?
-          → SIM: PsExec
-          → NÃO: sem transporte administrativo
-\`\`\`
+O menu 28 é o ponto central para ações mutáveis. Há também atalhos `90+` nos menus de diagnóstico.
 
-\`READY_WINRM\` só é emitido depois que o preflight valida o listener e uma execução real de \`Invoke-Command\`.
+O fluxo é:
 
-Estados de conectividade:
+```text
+ação
+ ↓
+parâmetros / seletor
+ ↓
+policy + capabilities + preconditions
+ ↓
+plano LIBERADO ou BLOQUEADO
+ ↓
+confirmação
+ ↓
+execução
+ ↓
+recovery se necessário
+ ↓
+postcheck
+ ↓
+PASS / FAIL / UNKNOWN
+ ↓
+SQLite / rollback quando disponível
+```
 
-- \`READY_LOCAL\`
-- \`READY_WINRM\`
-- \`READY_PSEXEC\`
-- \`DNS_FAILED\`
-- \`AUTHENTICATION_FAILED\`
-- \`NETWORK_UNREACHABLE\`
-- \`NO_USABLE_TRANSPORT\`
+### Confirmação
 
-WinRM não é requisito absoluto. Em ambiente com 5985 bloqueada, a Central pode operar via PsExec quando TCP 445, ADMIN$ e privilégios administrativos estiverem disponíveis e o executável PsExec estiver homologado na estação administrativa.
+Ações comuns usam confirmação simples.
 
-## Fallback seguro
+Ações HIGH/CRITICAL, destrutivas ou que podem afetar conectividade exigem:
 
-Leituras podem ser repetidas automaticamente em PsExec após falha de WinRM.
+```text
+EXECUTAR <hostname>
+```
 
-Mutações seguem outra regra:
+Rollback disponível exige:
 
-\`\`\`text
-falha comprovadamente antes da execução
-  → fallback permitido
+```text
+DESFAZER <hostname>
+```
 
-ação pode ter chegado ao host, mas a confirmação se perdeu
-  → resultado INDETERMINADO
-  → fallback automático bloqueado
-  → validar o estado antes de repetir
-\`\`\`
+## Seletores
 
-Isso evita executar duas vezes ações como reset, instalação, cleanup ou alteração de serviço.
+Quando possível, a Central lista objetos reais da estação para evitar digitação manual:
 
-## Compliance
+- processos;
+- serviços;
+- adaptadores;
+- impressoras;
+- perfis;
+- dispositivos PnP;
+- sessões.
 
-A avaliação usa quatro estados:
+A opção manual permanece como fallback.
 
-- **PASS** — evidência disponível e dentro do baseline;
-- **FAIL** — evidência disponível e fora do baseline;
-- **UNKNOWN** — métrica não pôde ser obtida;
-- **N/A** — controle não é exigido pelo baseline.
+## Retry e resultado indeterminado
 
-\`UNKNOWN\` não é tratado como \`FAIL\`. N/A não entra no denominador do score de compliance.
+Cada ação possui `retry_policy`.
 
-## Remediações guiadas
+Padrão: `PRE_EXECUTION_ONLY`.
 
-Atualmente possuem validação específica:
+A Central não repete automaticamente mutação com entrega incerta. `indeterminate=True` implica validação do estado antes de nova tentativa.
 
-- limpeza segura de temporários;
-- reinício do Spooler;
-- reset de componentes do Windows Update;
-- GPUpdate /force.
+## Desconexão esperada
 
-A Central coleta evidência antes/depois quando aplicável e registra o estado de validação como \`PASS\`, \`FAIL\` ou \`UNKNOWN\`.
+Ações como DHCP renew, restart de NIC e reboot podem usar `DisconnectMode.TEMPORARY`.
 
-## Configuração
+A Central aguarda, reabre a sessão e só então roda o postcheck.
 
-Base pública:
+Shutdown usa `TERMINAL`: a perda de conectividade é consequência esperada e não dispara recovery de retorno.
 
-\`\`\`text
-config\settings.json
-\`\`\`
+## Rollback
 
-Override local não versionado:
+Rollback existe apenas onde é tecnicamente defensável. Exemplos:
 
-\`\`\`text
-config\settings.local.json
-\`\`\`
+- Start/Stop de serviço → restaura estado anterior;
+- StartType → restaura Automatic/Manual/Disabled anterior;
+- Registro homologado → restaura valor/ausência anterior;
+- move/rename protegido → move de volta à origem.
 
-Use \`config\settings.local.example.json\` como modelo. O merge é recursivo. Segredos, URLs internas e caminhos privados ficam apenas no arquivo local.
+Não há rollback fictício para exclusão de arquivo, limpeza de TEMP ou remoção de perfil.
 
-## PsExec
+## Catálogos corporativos
 
-Diretório recomendado:
+São validados no bootstrap:
 
-\`\`\`text
-C:\Sysinternals\PsExec.exe
-\`\`\`
+- `packages`;
+- `certificates`;
+- `registry_actions`.
 
-A Central também procura no PATH e em \`C:\Windows\System32\PsExec.exe\`.
-
-Validação manual:
-
-\`\`\`powershell
-Test-NetConnection PC023 -Port 445
-Test-Path \\PC023\ADMIN$
-C:\Sysinternals\PsExec.exe -accepteula -nobanner \\PC023 cmd.exe /d /c echo CENTRAL_N2_OK
-\`\`\`
+Entrada inválida é desabilitada e registrada; não derruba a Central inteira.
 
 ## Persistência
 
-Por padrão:
+SQLite schema **4** registra execuções com:
 
-\`\`\`text
-data\central_n2.db
-\`\`\`
+- operador;
+- versão da ação;
+- transporte;
+- início/fim/duração;
+- risco;
+- parâmetros redigidos;
+- validation state;
+- correlation_id;
+- vínculo de rollback.
 
-SQLite usa WAL, migrations versionadas e retenção configurável. O schema é validado na inicialização. Jobs, snapshots, findings, remediações e relatórios carregam \`correlation_id\`.
+## Segurança
 
-## Atualizações
+A Central não expõe:
 
-O menu de atualização respeita \`updates.enabled\`. Downloads são feitos de forma controlada; a Central não se substitui silenciosamente.
+- PowerShell livre;
+- CMD livre;
+- editor genérico de Registro;
+- instalação arbitrária digitada pelo operador;
+- importação de PFX/chave privada;
+- delete recursivo genérico.
 
-Quando um asset publica digest SHA-256, o updater verifica o hash antes de promover o arquivo temporário ao destino final.
+Consulte `docs/security.md`.
 
 ## Testes
 
-\`\`\`powershell
+```powershell
 cd central_n2
-python -m pip install -r requirements-dev.txt
 python -W error::SyntaxWarning -m compileall -q .
 python -m pytest -q
-\`\`\`
+```
 
-O CI também executa Ruff, mypy, coverage, matriz Python e smoke de build/instalador.
-
-## Documentação
-
-Consulte \`docs/README.md\` para arquitetura, operação, segurança, configuração, troubleshooting, desenvolvimento e distribuição.
+O CI oficial também executa Ruff, mypy, coverage, build portátil e instalador.
