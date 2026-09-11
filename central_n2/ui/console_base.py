@@ -11,17 +11,21 @@ from core.config import ConfigLoader
 from core.jobs import JobManager, OperationClass, ResponsiveJobRunner
 from core.result import CommandResult
 from core.validation import validate_host, validate_process_name, validate_windows_path
+from modules.certificates import CertificatesModule
 from modules.crashes import CrashesModule
 from modules.devices import DevicesModule
 from modules.diagnostic_package import DiagnosticPackageModule
 from modules.diagnostics import DiagnosticsModule
 from modules.disk import DiskModule
+from modules.file_ops import FileOperationsModule
 from modules.domain import DomainModule
 from modules.glpi import GLPIModule
 from modules.health import HealthModule, calculate_health_score
 from modules.network import NetworkModule
+from modules.packages import PackagesModule
 from modules.performance import PerformanceModule
 from modules.printers import PrintersModule
+from modules.registry_actions import RegistryActionsModule
 from modules.repair import RepairModule
 from modules.security import SecurityModule
 from modules.software import SoftwareModule
@@ -101,6 +105,10 @@ class ConsoleBase:
             self.settings.get("sysinternals_dir", r"C:\Sysinternals"),
         )
         self.tools = WorkstationToolsModule(executor)
+        self.packages = PackagesModule(executor, self.settings)
+        self.certificates = CertificatesModule(executor, self.settings)
+        self.registry_actions = RegistryActionsModule(executor, self.settings)
+        self.file_ops = FileOperationsModule(executor)
 
     @staticmethod
     def clear() -> None:
