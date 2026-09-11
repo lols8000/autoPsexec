@@ -5,7 +5,12 @@ from remediation import validate_windows_update_reset
 
 from ..models import ExecutionAction, RiskLevel
 from ..validators import command_field_true
-from .common import ExecutionDependencies, _register, _update_install, _wrap_three_arg
+from .common import (
+    ExecutionDependencies,
+    _register,
+    _update_install,
+    _wrap_three_arg,
+)
 
 
 def register(registry, deps: ExecutionDependencies) -> None:
@@ -21,6 +26,9 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.LOW,
             "Baixo impacto.",
             180,
+            idempotent=True,
+            required_capabilities=("UsoClient",),
+            tags=("windows update", "scan", "usoclient"),
         ),
         lambda host, p: deps.updates.trigger_scan(host),
         validator=command_field_true(
@@ -42,6 +50,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
             "Pode alterar componentes do Windows e exigir reinicialização.",
             7800,
             requires_reboot=True,
+            required_capabilities=("WindowsUpdateCOM",),
+            tags=("windows update", "install", "update"),
         ),
         lambda host, p: deps.updates.install_pending(host),
         before_probe=lambda host, p: deps.updates.status(host),
@@ -60,6 +70,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.HIGH,
             "Reconstrói caches do Windows Update.",
             600,
+            tags=("windows update", "reset", "softwaredistribution"),
         ),
         lambda host, p: deps.updates.reset_components(host),
         validator=_wrap_three_arg(validate_windows_update_reset),
