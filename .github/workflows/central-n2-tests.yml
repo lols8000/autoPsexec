@@ -50,7 +50,7 @@ jobs:
           core/connectivity.py core/context.py core/evaluation.py
           core/executor.py core/jobs.py core/logger.py core/result.py
           core/session.py core/transport core/updater.py core/validation.py
-          diagnostics playbooks remediation reports storage
+          diagnostics execution playbooks remediation reports storage
           integrations/glpi/client.py
           ui/console_base.py ui/console_v5.py ui/tk_app.py
           modules/health.py modules/compliance.py modules/performance.py
@@ -58,7 +58,8 @@ jobs:
           modules/network.py modules/printers.py modules/system.py
           modules/domain.py modules/devices.py modules/software.py
           modules/users_profiles.py modules/workstation_tools.py
-          modules/repair.py
+          modules/repair.py modules/packages.py modules/certificates.py
+          modules/registry_actions.py modules/file_ops.py
           --select E4,E7,E9,F
 
       - name: Mypy hardened contracts
@@ -67,6 +68,7 @@ jobs:
           python -m mypy --explicit-package-bases
           core/result.py core/context.py core/actions.py
           core/evaluation.py core/updater.py core/validation.py
+          execution/models.py execution/registry.py execution/engine.py
           remediation/engine.py
 
       - name: Run tests
@@ -78,7 +80,7 @@ jobs:
         run: >-
           python -m pytest -q
           --cov=core --cov=diagnostics --cov=playbooks
-          --cov=remediation --cov=reports --cov=storage
+          --cov=execution --cov=remediation --cov=reports --cov=storage
           --cov-report=term-missing
           --cov-fail-under=40
 
