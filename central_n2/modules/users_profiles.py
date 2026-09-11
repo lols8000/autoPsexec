@@ -66,7 +66,7 @@ $p = Get-CimInstance Win32_UserProfile -Filter "SID='{safe_sid}'" -ErrorAction S
 
     def clean_profile_temp(self, host: str, sid: str) -> CommandResult:
         safe_sid = validate_sid(sid)
-        script = f"""
+        script = fr"""
 $p = Get-CimInstance Win32_UserProfile -Filter "SID='{safe_sid}'" -ErrorAction Stop
 if (-not $p) {{ throw 'Perfil não encontrado.' }}
 if ($p.Special) {{ throw 'Perfil especial não pode ser limpo por esta ação.' }}
