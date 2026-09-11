@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from core.jobs import OperationClass
-from ..models import ExecutionAction, ExecutionParameter, ParameterKind, RiskLevel
+
+from ..models import (
+    ExecutionAction,
+    ExecutionParameter,
+    ParameterKind,
+    RiskLevel,
+    SelectorKind,
+)
 from ..validators import command_completed
 from .common import ExecutionDependencies, _device_state, _register
 
@@ -9,8 +16,10 @@ from .common import ExecutionDependencies, _device_state, _register
 def register(registry, deps: ExecutionDependencies) -> None:
     instance = ExecutionParameter(
         "instance_id",
-        "PNP InstanceId",
+        "Dispositivo",
         ParameterKind.TEXT,
+        selector=SelectorKind.DEVICE,
+        help_text="Selecione um PnP presente ou informe o InstanceId.",
     )
     for key, title, enabled, risk in (
         ("device.enable", "Habilitar dispositivo", True, RiskLevel.MEDIUM),
@@ -31,6 +40,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
                 destructive=not enabled,
                 may_break_connectivity=not enabled,
                 parameters=(instance,),
+                required_capabilities=("PnpDevice",),
+                tags=("dispositivo", "pnp", "enable" if enabled else "disable"),
             ),
             lambda host, p, state=enabled: deps.devices.set_device_state(
                 host,
@@ -59,6 +70,9 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.LOW,
             "Baixo impacto.",
             240,
+            idempotent=True,
+            required_capabilities=("PnPUtil",),
+            tags=("dispositivo", "pnp", "rescan"),
         ),
         lambda host, p: deps.devices.rescan(host),
         validator=command_completed,
@@ -76,6 +90,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
             "Pode trocar driver de dispositivo.",
             900,
             requires_reboot=True,
+            required_capabilities=("PnPUtil",),
             parameters=(
                 ExecutionParameter(
                     "path",
@@ -83,6 +98,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
                     ParameterKind.TEXT,
                 ),
             ),
+            tags=("driver", "inf", "pnputil", "instalar"),
         ),
         lambda host, p: deps.devices.install_driver_inf(
             host,
@@ -104,6 +120,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
             900,
             destructive=True,
             requires_reboot=True,
+            required_capabilities=("PnPUtil",),
             parameters=(
                 ExecutionParameter(
                     "inf_name",
@@ -111,6 +128,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
                     ParameterKind.TEXT,
                 ),
             ),
+            tags=("driver", "pnputil", "remover", "oem"),
         ),
         lambda host, p: deps.devices.remove_driver_package(
             host,
