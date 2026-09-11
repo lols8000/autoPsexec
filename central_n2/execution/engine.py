@@ -5,9 +5,31 @@ from typing import Any
 from remediation import RemediationEngine, RemediationSpec
 
 from .models import ExecutionRecord
-from .registry import ActionRegistry, BoundExecutionAction
+from .registry import ActionRegistry, BoundExecutionAction, Probe, Validator
 from .validators import command_completed
 
+
+
+
+
+def _bind_probe(
+    probe: Probe,
+    parameters: dict[str, Any],
+):
+    def bound(target: str) -> Any:
+        return probe(target, parameters)
+
+    return bound
+
+
+def _bind_validator(
+    validator: Validator,
+    parameters: dict[str, Any],
+):
+    def bound(before, command, after):
+        return validator(before, command, after, parameters)
+
+    return bound
 
 class ExecutionEngine:
     def __init__(
@@ -47,17 +69,20 @@ class ExecutionEngine:
         bound = self.registry.get(action_key)
         parsed = self.validate_parameters(bound, parameters)
 
-        before_probe = None
-        if bound.before_probe is not None:
-            probe = bound.before_probe
-            before_probe = lambda target: probe(target, parsed)
-
-        after_probe = None
-        if bound.after_probe is not None:
-            probe_after = bound.after_probe
-            after_probe = lambda target: probe_after(target, parsed)
-
-        validator = bound.validator or command_completed
+        before_probe = (
+            _bind_probe(bound.before_probe, parsed)
+            if bound.before_probe is not None
+            else None
+        )
+        after_probe = (
+            _bind_probe(bound.after_probe, parsed)
+            if bound.after_probe is not None
+            else None
+        )
+        validator = _bind_validator(
+            bound.validator or command_completed,
+            parsed,
+        )
 
         remediation = self.remediation_engine.execute(
             host,
@@ -73,12 +98,7 @@ class ExecutionEngine:
             lambda target: bound.handler(target, parsed),
             before_probe=before_probe,
             after_probe=after_probe,
-            validator=lambda before, command, after: validator(
-                before,
-                command,
-                after,
-                parsed,
-            ),
+            validator=validator,
         )
 
         return ExecutionRecord(
