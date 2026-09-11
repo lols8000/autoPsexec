@@ -143,3 +143,96 @@ def service_stopped(
             data,
         )
     return command_completed(before, command, after, parameters)
+
+
+
+def command_field_true(
+    field: str,
+    *,
+    pass_message: str,
+    fail_message: str,
+):
+    def validate(
+        before: Any,
+        command: CommandResult,
+        after: Any,
+        parameters: dict[str, Any],
+    ) -> ValidationResult:
+        if command.indeterminate:
+            return ValidationResult(
+                ValidationStatus.UNKNOWN,
+                "A execução teve resultado indeterminado.",
+                command.data,
+            )
+        data = command.data
+        if not isinstance(data, dict) or field not in data:
+            if command.success:
+                return ValidationResult(
+                    ValidationStatus.UNKNOWN,
+                    f"Não foi possível validar o campo '{field}'.",
+                    data,
+                )
+            return ValidationResult(
+                ValidationStatus.FAIL,
+                command.stderr or fail_message,
+                data,
+            )
+        if bool(data.get(field)):
+            return ValidationResult(
+                ValidationStatus.PASS,
+                pass_message,
+                data,
+            )
+        return ValidationResult(
+            ValidationStatus.FAIL,
+            fail_message,
+            data,
+        )
+
+    return validate
+
+
+def after_field_matches_parameter(
+    field: str,
+    parameter_key: str,
+    *,
+    pass_message: str,
+    fail_message: str,
+):
+    def validate(
+        before: Any,
+        command: CommandResult,
+        after: Any,
+        parameters: dict[str, Any],
+    ) -> ValidationResult:
+        if command.indeterminate:
+            return ValidationResult(
+                ValidationStatus.UNKNOWN,
+                "A execução teve resultado indeterminado.",
+                after,
+            )
+        data = after.data if isinstance(after, CommandResult) else after
+        if not isinstance(data, dict) or field not in data:
+            return ValidationResult(
+                ValidationStatus.UNKNOWN if command.success else ValidationStatus.FAIL,
+                (
+                    f"Não foi possível validar o campo '{field}'."
+                    if command.success
+                    else command.stderr or fail_message
+                ),
+                data,
+            )
+        expected = parameters.get(parameter_key)
+        if str(data.get(field)).casefold() == str(expected).casefold():
+            return ValidationResult(
+                ValidationStatus.PASS,
+                pass_message,
+                data,
+            )
+        return ValidationResult(
+            ValidationStatus.FAIL,
+            fail_message,
+            data,
+        )
+
+    return validate
