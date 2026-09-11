@@ -47,6 +47,18 @@ class ExecutionEngine:
         bound = self.registry.get(action_key)
         parsed = self.validate_parameters(bound, parameters)
 
+        before_probe = None
+        if bound.before_probe is not None:
+            probe = bound.before_probe
+            before_probe = lambda target: probe(target, parsed)
+
+        after_probe = None
+        if bound.after_probe is not None:
+            probe_after = bound.after_probe
+            after_probe = lambda target: probe_after(target, parsed)
+
+        validator = bound.validator or command_completed
+
         remediation = self.remediation_engine.execute(
             host,
             RemediationSpec(
@@ -59,19 +71,14 @@ class ExecutionEngine:
                 rollback=None,
             ),
             lambda target: bound.handler(target, parsed),
-            before_probe=(
-                None
-                if bound.before_probe is None
-                else lambda target: bound.before_probe(target, parsed)
+            before_probe=before_probe,
+            after_probe=after_probe,
+            validator=lambda before, command, after: validator(
+                before,
+                command,
+                after,
+                parsed,
             ),
-            after_probe=(
-                None
-                if bound.after_probe is None
-                else lambda target: bound.after_probe(target, parsed)
-            ),
-            validator=lambda before, command, after: (
-                bound.validator or command_completed
-            )(before, command, after, parsed),
         )
 
         return ExecutionRecord(
