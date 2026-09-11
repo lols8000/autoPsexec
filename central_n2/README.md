@@ -82,7 +82,7 @@ Quando possível, a Central lista objetos reais da estação para evitar digita�
 - dispositivos PnP;
 - sessões.
 
-A opção manual permanece como fallback.
+A opção manual permanece como fallback. Perfis e sessões usam inventários leves/estruturados para reduzir latência e erro de seleção.
 
 ## Retry e resultado indeterminado
 
@@ -109,7 +109,7 @@ Rollback existe apenas onde é tecnicamente defensável. Exemplos:
 - Registro homologado → restaura valor/ausência anterior;
 - move/rename protegido → move de volta à origem.
 
-Não há rollback fictício para exclusão de arquivo, limpeza de TEMP ou remoção de perfil. Guardas específicas de rollback impedem reversões que poderiam sobrescrever estado novo.
+Não há rollback fictício para exclusão de arquivo, limpeza de TEMP ou remoção de perfil. Guardas específicas de rollback impedem reversões que poderiam sobrescrever estado novo. O atendimento mantém uma pilha LIFO das execuções reversíveis.
 
 ## Catálogos corporativos
 
@@ -134,6 +134,10 @@ SQLite schema **4** registra execuções com:
 - validation state;
 - correlation_id;
 - vínculo de rollback.
+
+## Operações de arquivo
+
+Por padrão, ações de arquivo só podem atuar sob `C:\CentralN2` e `C:\Temp`. As raízes podem ser ajustadas em `execution.file_roots`; traversal e caminhos fora da allowlist são bloqueados.
 
 ## Segurança
 
