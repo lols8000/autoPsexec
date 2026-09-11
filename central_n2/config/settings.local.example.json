@@ -11,5 +11,31 @@
   },
   "logging": {
     "verbose_payloads": false
+  },
+  "packages": {
+    "exemplo_msi": {
+      "name": "Aplicativo Corporativo",
+      "source": "\\\\\\\\servidor\\\\share\\\\Aplicativo.msi",
+      "type": "msi",
+      "args": "/qn /norestart",
+      "cleanup": true,
+      "timeout_seconds": 1800
+    }
+  },
+  "certificates": {
+    "raiz_corporativa": {
+      "name": "CA Corporativa",
+      "source": "\\\\\\\\servidor\\\\share\\\\ca-corporativa.cer",
+      "store": "Root"
+    }
+  },
+  "registry_actions": {
+    "exemplo_hklm": {
+      "name": "Enabled",
+      "path": "HKLM:\\\\SOFTWARE\\\\Empresa\\\\Produto",
+      "type": "DWord",
+      "value": 1,
+      "mode": "set"
+    }
   }
 }
