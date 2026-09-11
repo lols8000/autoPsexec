@@ -11,6 +11,7 @@ from execution import (
     ExecutionDependencies,
     ExecutionEngine,
     ExecutionParameter,
+    ExecutionPolicyContext,
     ParameterKind,
     RiskLevel,
     build_execution_registry,
@@ -22,6 +23,7 @@ from modules.disk import DiskModule
 from modules.domain import DomainModule
 from modules.file_ops import FileOperationsModule
 from modules.glpi import GLPIModule
+from modules.health import HealthModule
 from modules.network import NetworkModule
 from modules.packages import PackagesModule
 from modules.printers import PrintersModule
@@ -37,6 +39,26 @@ from remediation import ValidationStatus
 
 class DummyExecutor:
     logger = None
+
+
+def _context(
+    host: str = "PC01",
+    *,
+    transport: str = "winrm",
+    capabilities: dict | None = None,
+) -> ExecutionPolicyContext:
+    values = {
+        "IsAdmin": True,
+        "IsSystem": False,
+    }
+    if capabilities:
+        values.update(capabilities)
+    return ExecutionPolicyContext(
+        host=host,
+        ready=True,
+        transport=transport,
+        capabilities=values,
+    )
 
 
 def _registry(tmp_path: Path) -> ActionRegistry:
@@ -90,6 +112,7 @@ def _registry(tmp_path: Path) -> ActionRegistry:
             settings_path,
             settings=settings,
         ),
+        health=HealthModule(executor),
         security=SecurityModule(executor),
         updates=UpdatesModule(executor),
         repair=RepairModule(executor),
@@ -213,6 +236,7 @@ def test_execution_engine_coerces_parameters_and_validates():
         "PC01",
         "test.action",
         {"count": "4", "mode": "B"},
+        context=_context(),
     )
 
     assert seen == {"count": 4, "mode": "B"}
@@ -248,6 +272,7 @@ def test_execution_engine_blocks_unknown_parameters():
             "PC01",
             "test.action",
             {"unexpected": "x"},
+            context=_context(),
         )
     except ValueError as exc:
         assert "não reconhecido" in str(exc)
@@ -289,6 +314,7 @@ def test_indeterminate_execution_becomes_unknown_validation():
     result = ExecutionEngine(registry).execute(
         "PC01",
         "test.indeterminate",
+        context=_context(),
     )
 
     assert result.remediation.command_result.indeterminate is True
@@ -333,6 +359,7 @@ def test_sensitive_parameters_are_redacted():
         "PC01",
         "test.secret",
         {"token": "super-secret"},
+        context=_context(),
     )
 
     assert record.parameters["token"] == "super-secret"
