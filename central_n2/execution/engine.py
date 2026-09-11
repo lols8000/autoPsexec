@@ -320,14 +320,14 @@ class ExecutionEngine:
         validator = bound.rollback_validator
         if validator is None:
             validation = command_completed(
-                record.remediation.after,
+                record.remediation.before,
                 result,
                 after,
                 record.parameters,
             )
         else:
             validation = validator(
-                record.remediation.after,
+                record.remediation.before,
                 result,
                 after,
                 record.parameters,
