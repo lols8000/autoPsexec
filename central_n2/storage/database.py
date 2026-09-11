@@ -12,7 +12,7 @@ from .diff import diff_values
 
 
 class CentralDatabase:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -79,6 +79,9 @@ class CentralDatabase:
             if version < 2:
                 self._migration_2(connection)
                 version = 2
+            if version < 3:
+                self._migration_3(connection)
+                version = 3
             connection.execute(f"PRAGMA user_version={version}")
 
             if version != self.SCHEMA_VERSION:
@@ -183,6 +186,28 @@ class CentralDatabase:
                 ON reports(host, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_reports_correlation
                 ON reports(correlation_id);
+            """
+        )
+
+    @staticmethod
+    def _migration_3(connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS executions(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                host TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                action TEXT NOT NULL,
+                validation_state TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                correlation_id TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_executions_host_created
+                ON executions(host, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_executions_correlation
+                ON executions(correlation_id);
+            CREATE INDEX IF NOT EXISTS idx_executions_action
+                ON executions(action);
             """
         )
 
@@ -435,6 +460,61 @@ class CentralDatabase:
             for row in rows
         ]
 
+    def save_execution(
+        self,
+        host: str,
+        action: str,
+        validation_state: str,
+        payload: Any,
+        *,
+        correlation_id: str | None = None,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            self._touch_host(connection, host, now)
+            connection.execute(
+                """
+                INSERT INTO executions(
+                    host,created_at,action,validation_state,payload,correlation_id
+                ) VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    host,
+                    now,
+                    action,
+                    validation_state,
+                    self._encode(payload),
+                    correlation_id,
+                ),
+            )
+
+    def recent_executions(
+        self,
+        host: str,
+        *,
+        limit: int = 30,
+    ) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,host,created_at,action,validation_state,payload,correlation_id
+                FROM executions
+                WHERE lower(host)=lower(?)
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (host, max(1, int(limit))),
+            ).fetchall()
+
+        return [
+            {
+                **dict(row),
+                "payload": json.loads(row["payload"]),
+            }
+            for row in rows
+        ]
+
     def save_report(
         self,
         host: str,
@@ -476,6 +556,7 @@ class CentralDatabase:
                 "jobs",
                 "findings",
                 "remediations",
+                "executions",
                 "reports",
             ):
                 cursor = connection.execute(
@@ -492,6 +573,7 @@ class CentralDatabase:
                   AND host NOT IN (SELECT host FROM jobs)
                   AND host NOT IN (SELECT host FROM findings)
                   AND host NOT IN (SELECT host FROM remediations)
+                  AND host NOT IN (SELECT host FROM executions)
                   AND host NOT IN (SELECT host FROM reports)
                 """,
                 (cutoff,),
