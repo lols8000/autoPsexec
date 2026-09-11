@@ -470,7 +470,7 @@ class CentralDatabase:
                     now,
                     action,
                     int(success),
-                    self._encode(payload),
+                    self._encode(redact(payload)),
                     correlation_id,
                 ),
             )
