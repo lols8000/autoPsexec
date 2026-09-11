@@ -1,3 +1,4 @@
+from .catalog import ExecutionDependencies, build_execution_registry
 from .engine import ExecutionEngine
 from .models import (
     ExecutionAction,
@@ -19,6 +20,7 @@ from .validators import (
 
 __all__ = [
     "ActionRegistry",
+    "ExecutionDependencies",
     "BoundExecutionAction",
     "ExecutionAction",
     "ExecutionEngine",
@@ -30,4 +32,5 @@ __all__ = [
     "field_equals",
     "service_running",
     "service_stopped",
+    "build_execution_registry",
 ]
