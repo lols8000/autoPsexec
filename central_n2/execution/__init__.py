@@ -13,6 +13,7 @@ from .models import (
     ParameterKind,
     PrivilegeLevel,
     RecoveryResult,
+    RetryPolicy,
     RiskLevel,
     SelectorKind,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "PolicyState",
     "PrivilegeLevel",
     "RecoveryResult",
+    "RetryPolicy",
     "RiskLevel",
     "SelectorKind",
     "build_execution_registry",
