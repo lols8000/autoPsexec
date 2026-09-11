@@ -291,3 +291,26 @@ def test_attendance_context_clears_rollback_stack_when_host_changes():
     assert context.host == "PC02"
     assert context.execution is None
     assert context.rollback_stack == []
+
+
+
+def test_database_redacts_remediation_payload(tmp_path: Path):
+    database = CentralDatabase(tmp_path / "central.db")
+    database.save_remediation(
+        "PC01",
+        "test",
+        True,
+        {
+            "token": "remediation-secret-token",
+            "nested": {"password": "remediation-secret-password"},
+        },
+        correlation_id="REM001",
+    )
+
+    row = database.recent_remediations("PC01", limit=1)[0]
+    encoded = str(row["payload"])
+
+    assert "remediation-secret-token" not in encoded
+    assert "remediation-secret-password" not in encoded
+    assert row["payload"]["token"] == "***"
+    assert row["payload"]["nested"]["password"] == "***"
