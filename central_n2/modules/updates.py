@@ -49,12 +49,70 @@ try {
 $uso = Join-Path $env:SystemRoot 'System32\UsoClient.exe'
 if (-not (Test-Path $uso)) { throw 'UsoClient.exe não encontrado.' }
 Start-Process $uso -ArgumentList 'StartScan' -WindowStyle Hidden
-'Busca iniciada.'
+[pscustomobject]@{ScanTriggered=$true}
 """
-        return self.executor.execute_mutating_powershell(
+        return self.executor.execute_mutating_powershell_json(
             host,
             script,
             timeout=60,
+        )
+
+    def install_pending(self, host: str) -> CommandResult:
+        script = r"""
+$session = New-Object -ComObject Microsoft.Update.Session
+$searcher = $session.CreateUpdateSearcher()
+$search = $searcher.Search("IsInstalled=0 and IsHidden=0")
+
+$selected = New-Object -ComObject Microsoft.Update.UpdateColl
+$titles = @()
+for ($i = 0; $i -lt $search.Updates.Count; $i++) {
+    $update = $search.Updates.Item($i)
+    if (-not $update.EulaAccepted) {
+        $update.AcceptEula()
+    }
+    [void]$selected.Add($update)
+    $titles += $update.Title
+}
+
+if ($selected.Count -eq 0) {
+    [pscustomobject]@{
+        PendingBefore = 0
+        Downloaded = 0
+        Installed = 0
+        RebootRequired = $false
+        Titles = @()
+        ResultCode = 0
+    }
+    return
+}
+
+$downloader = $session.CreateUpdateDownloader()
+$downloader.Updates = $selected
+$download = $downloader.Download()
+if ($download.ResultCode -notin 2,3) {
+    throw "Download do Windows Update falhou. ResultCode=$($download.ResultCode)"
+}
+
+$installer = $session.CreateUpdateInstaller()
+$installer.Updates = $selected
+$install = $installer.Install()
+if ($install.ResultCode -notin 2,3) {
+    throw "Instalação do Windows Update falhou. ResultCode=$($install.ResultCode)"
+}
+
+[pscustomobject]@{
+    PendingBefore = $selected.Count
+    Downloaded = $selected.Count
+    Installed = $selected.Count
+    RebootRequired = [bool]$install.RebootRequired
+    Titles = $titles
+    ResultCode = [int]$install.ResultCode
+}
+"""
+        return self.executor.execute_mutating_powershell_json(
+            host,
+            script,
+            timeout=7200,
         )
 
     def reset_components(self, host: str) -> CommandResult:
