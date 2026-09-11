@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(5, 1, 0, 0),
-    prodvers=(5, 1, 0, 0),
+    filevers=(5, 2, 0, 0),
+    prodvers=(5, 2, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -17,11 +17,11 @@ VSVersionInfo(
           [
             StringStruct('CompanyName', 'Central N2'),
             StringStruct('FileDescription', 'Central N2 Workstation'),
-            StringStruct('FileVersion', '5.1.0'),
+            StringStruct('FileVersion', '5.2.0'),
             StringStruct('InternalName', 'CentralN2'),
             StringStruct('OriginalFilename', 'CentralN2.exe'),
             StringStruct('ProductName', 'Central N2 Workstation'),
-            StringStruct('ProductVersion', '5.1.0')
+            StringStruct('ProductVersion', '5.2.0')
           ]
         )
       ]
