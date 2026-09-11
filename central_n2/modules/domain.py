@@ -9,7 +9,7 @@ class DomainModule:
         self.executor = executor
 
     def status(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 $cs = Get-CimInstance Win32_ComputerSystem
 $domain = $cs.Domain
 $dc = $null
@@ -43,8 +43,74 @@ try { $time = (w32tm /query /status 2>$null | Out-String).Trim() } catch {}
         )
 
     def repair_secure_channel(self, host: str) -> CommandResult:
-        return self.executor.execute_mutating_powershell(
+        script = r"""
+$before = Test-ComputerSecureChannel -ErrorAction SilentlyContinue
+$repair = Test-ComputerSecureChannel -Repair -ErrorAction Stop
+$after = Test-ComputerSecureChannel -ErrorAction Stop
+[pscustomobject]@{
+    Before = $before
+    RepairResult = $repair
+    SecureChannel = $after
+}
+"""
+        return self.executor.execute_mutating_powershell_json(
             host,
-            "Test-ComputerSecureChannel -Repair -ErrorAction Stop",
+            script,
+            timeout=180,
+        )
+
+    def restart_time_service(self, host: str) -> CommandResult:
+        script = r"""
+Restart-Service w32time -Force -ErrorAction Stop
+$svc = Get-Service w32time -ErrorAction Stop
+[pscustomobject]@{
+    Name = $svc.Name
+    Status = $svc.Status.ToString()
+    StartType = $svc.StartType.ToString()
+}
+"""
+        return self.executor.execute_mutating_powershell_json(
+            host,
+            script,
+            timeout=90,
+        )
+
+    def resync_time(self, host: str) -> CommandResult:
+        script = r"""
+Restart-Service w32time -Force -ErrorAction Stop
+$output = & w32tm /resync /rediscover 2>&1 | Out-String
+$code = $LASTEXITCODE
+if ($code -ne 0) {
+    throw "w32tm /resync retornou exit code $code. $output"
+}
+$status = & w32tm /query /status 2>&1 | Out-String
+[pscustomobject]@{
+    ResyncSucceeded = $true
+    Output = $output.Trim()
+    Status = $status.Trim()
+}
+"""
+        return self.executor.execute_mutating_powershell_json(
+            host,
+            script,
             timeout=120,
+        )
+
+    def purge_system_kerberos(self, host: str) -> CommandResult:
+        script = r"""
+$output = & klist.exe -li 0x3e7 purge 2>&1 | Out-String
+$code = $LASTEXITCODE
+if ($code -ne 0) {
+    throw "klist purge retornou exit code $code. $output"
+}
+[pscustomobject]@{
+    Purged = $true
+    LogonId = '0x3e7'
+    Output = $output.Trim()
+}
+"""
+        return self.executor.execute_mutating_powershell_json(
+            host,
+            script,
+            timeout=90,
         )
