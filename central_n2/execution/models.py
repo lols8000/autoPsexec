@@ -45,43 +45,43 @@ class ExecutionParameter:
 
         if self.kind is ParameterKind.INTEGER:
             try:
-                value = int(str(raw).strip())
+                int_value = int(str(raw).strip())
             except ValueError as exc:
                 raise ValueError(
                     f"{self.label} deve ser um número inteiro."
                 ) from exc
-            if self.min_value is not None and value < self.min_value:
+            if self.min_value is not None and int_value < self.min_value:
                 raise ValueError(
                     f"{self.label} deve ser >= {self.min_value}."
                 )
-            if self.max_value is not None and value > self.max_value:
+            if self.max_value is not None and int_value > self.max_value:
                 raise ValueError(
                     f"{self.label} deve ser <= {self.max_value}."
                 )
-            return value
+            return int_value
 
         if self.kind is ParameterKind.BOOLEAN:
             if isinstance(raw, bool):
                 return raw
-            value = str(raw).strip().casefold()
+            boolean_text = str(raw).strip().casefold()
             truthy = {"1", "true", "sim", "s", "yes", "y"}
             falsy = {"0", "false", "não", "nao", "n", "no"}
-            if value in truthy:
+            if boolean_text in truthy:
                 return True
-            if value in falsy:
+            if boolean_text in falsy:
                 return False
             raise ValueError(
                 f"{self.label} deve ser SIM/NÃO."
             )
 
-        value = str(raw).strip()
+        text_value = str(raw).strip()
         if self.kind is ParameterKind.CHOICE:
-            if value not in self.choices:
+            if text_value not in self.choices:
                 allowed = ", ".join(self.choices)
                 raise ValueError(
                     f"{self.label} deve ser um de: {allowed}."
                 )
-        return value
+        return text_value
 
 
 @dataclass(frozen=True, slots=True)
