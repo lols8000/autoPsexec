@@ -222,7 +222,7 @@ def test_package_copy_uses_direct_path_for_local_target(tmp_path: Path):
 
     assert result.success is True
     assert destination.read_bytes() == b"package"
-    assert all("\\localhost\" not in command for _, _, command in executor.commands)
+    assert all("\\\\localhost\\" not in command for _, _, command in executor.commands)
 
 
 def test_certificate_copy_uses_direct_path_for_local_target(tmp_path: Path):
@@ -248,7 +248,7 @@ def test_certificate_copy_uses_direct_path_for_local_target(tmp_path: Path):
 
     assert result.success is True
     assert destination.read_bytes() == b"certificate"
-    assert "\\localhost\" not in executor.commands[-1][2]
+    assert "\\\\localhost\\" not in executor.commands[-1][2]
 
 
 def test_registry_rollback_restores_original_value_kind():
