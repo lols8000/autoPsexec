@@ -4,7 +4,10 @@ from typing import Any
 
 from core.executor import RemoteExecutor
 from core.result import CommandResult
-from core.validation import quote_powershell_literal, validate_safe_name
+from core.validation import (
+    quote_powershell_literal,
+    validate_safe_name,
+)
 
 
 class RegistryActionsModule:
@@ -30,8 +33,15 @@ class RegistryActionsModule:
     def keys(self) -> tuple[str, ...]:
         return tuple(sorted(self.catalog))
 
-    def apply(self, host: str, key: str) -> CommandResult:
-        safe_key = validate_safe_name(key, label="Ação de Registro")
+    def _definition(
+        self,
+        host: str,
+        key: str,
+    ) -> tuple[str, dict[str, Any]] | CommandResult:
+        safe_key = validate_safe_name(
+            key,
+            label="Ação de Registro",
+        )
         item = self.catalog.get(safe_key)
         if not isinstance(item, dict):
             return CommandResult.failure(
@@ -56,6 +66,66 @@ class RegistryActionsModule:
                 "Nome do valor não configurado.",
             )
 
+        return safe_key, item
+
+    @staticmethod
+    def _render_value(value: Any) -> str:
+        if isinstance(value, str):
+            return quote_powershell_literal(value)
+        if isinstance(value, bool):
+            return "$true" if value else "$false"
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, list):
+            items = ",".join(
+                quote_powershell_literal(str(entry))
+                for entry in value
+            )
+            return f"@({items})"
+        raise ValueError("Tipo de valor não suportado.")
+
+    def inspect(self, host: str, key: str) -> CommandResult:
+        definition = self._definition(host, key)
+        if isinstance(definition, CommandResult):
+            return definition
+
+        safe_key, item = definition
+        path = str(item["path"])
+        name = str(item["name"])
+        safe_path = quote_powershell_literal(path)
+        safe_name = quote_powershell_literal(name)
+
+        script = f"""
+$exists = $false
+$value = $null
+if (Test-Path {safe_path}) {{
+    try {{
+        $value = Get-ItemPropertyValue -Path {safe_path} -Name {safe_name} -ErrorAction Stop
+        $exists = $true
+    }} catch {{}}
+}}
+[pscustomobject]@{{
+    Exists = [bool]$exists
+    Value = $value
+    Path = {safe_path}
+    Name = {safe_name}
+    CatalogKey = '{safe_key}'
+}}
+"""
+        return self.executor.execute_powershell_json(
+            host,
+            script,
+            timeout=90,
+        )
+
+    def apply(self, host: str, key: str) -> CommandResult:
+        definition = self._definition(host, key)
+        if isinstance(definition, CommandResult):
+            return definition
+
+        safe_key, item = definition
+        path = str(item["path"])
+        name = str(item["name"])
         mode = str(item.get("mode") or "set").casefold()
         safe_path = quote_powershell_literal(path)
         safe_name = quote_powershell_literal(name)
@@ -63,7 +133,7 @@ class RegistryActionsModule:
         if mode == "remove":
             script = f"""
 if (Test-Path {safe_path}) {{
-    Remove-ItemProperty -Path {safe_path} -Name {safe_name} -ErrorAction Stop
+    Remove-ItemProperty -Path {safe_path} -Name {safe_name} -ErrorAction SilentlyContinue
 }}
 [pscustomobject]@{{Applied=$true;Mode='remove';Path={safe_path};Name={safe_name}}}
 """
@@ -76,25 +146,15 @@ if (Test-Path {safe_path}) {{
                     safe_key,
                     f"Tipo de Registro não permitido: {value_type}",
                 )
-            value = item.get("value")
-            if isinstance(value, str):
-                ps_value = quote_powershell_literal(value)
-            elif isinstance(value, bool):
-                ps_value = "$true" if value else "$false"
-            elif isinstance(value, (int, float)):
-                ps_value = str(value)
-            elif isinstance(value, list):
-                items = ",".join(
-                    quote_powershell_literal(str(entry))
-                    for entry in value
-                )
-                ps_value = f"@({items})"
-            else:
+            try:
+                ps_value = self._render_value(item.get("value"))
+            except ValueError as exc:
                 return CommandResult.failure(
                     host,
                     safe_key,
-                    "Tipo de valor não suportado.",
+                    str(exc),
                 )
+
             script = f"""
 New-Item -Path {safe_path} -Force -ErrorAction Stop | Out-Null
 New-ItemProperty -Path {safe_path} -Name {safe_name} -Value {ps_value} -PropertyType {allowed_type} -Force -ErrorAction Stop | Out-Null
@@ -114,4 +174,71 @@ $value = Get-ItemPropertyValue -Path {safe_path} -Name {safe_name} -ErrorAction 
             timeout=120,
         )
         result.metadata["registry_action_key"] = safe_key
+        return result
+
+    def rollback(
+        self,
+        host: str,
+        key: str,
+        before: Any,
+    ) -> CommandResult:
+        definition = self._definition(host, key)
+        if isinstance(definition, CommandResult):
+            return definition
+
+        safe_key, item = definition
+        evidence = (
+            before.data
+            if isinstance(before, CommandResult)
+            else before
+        )
+        if not isinstance(evidence, dict) or "Exists" not in evidence:
+            return CommandResult.failure(
+                host,
+                safe_key,
+                "Estado anterior do Registro não está disponível.",
+            )
+
+        path = str(item["path"])
+        name = str(item["name"])
+        safe_path = quote_powershell_literal(path)
+        safe_name = quote_powershell_literal(name)
+
+        if evidence.get("Exists") is True:
+            value_type = str(item.get("type") or "String")
+            allowed_type = self.ALLOWED_TYPES.get(value_type)
+            if not allowed_type:
+                return CommandResult.failure(
+                    host,
+                    safe_key,
+                    f"Tipo de Registro não permitido: {value_type}",
+                )
+            try:
+                previous = self._render_value(evidence.get("Value"))
+            except ValueError as exc:
+                return CommandResult.failure(
+                    host,
+                    safe_key,
+                    str(exc),
+                )
+            script = f"""
+New-Item -Path {safe_path} -Force -ErrorAction Stop | Out-Null
+New-ItemProperty -Path {safe_path} -Name {safe_name} -Value {previous} -PropertyType {allowed_type} -Force -ErrorAction Stop | Out-Null
+[pscustomobject]@{{Applied=$true;Rollback=$true;Restored='value';Path={safe_path};Name={safe_name}}}
+"""
+        else:
+            script = f"""
+if (Test-Path {safe_path}) {{
+    Remove-ItemProperty -Path {safe_path} -Name {safe_name} -ErrorAction SilentlyContinue
+}}
+[pscustomobject]@{{Applied=$true;Rollback=$true;Restored='absent';Path={safe_path};Name={safe_name}}}
+"""
+
+        result = self.executor.execute_mutating_powershell_json(
+            host,
+            script,
+            timeout=120,
+        )
+        result.metadata["registry_action_key"] = safe_key
+        result.metadata["rollback"] = True
         return result
