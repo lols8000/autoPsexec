@@ -60,7 +60,8 @@ jobs:
           python -m mypy --explicit-package-bases
           core/result.py core/context.py core/actions.py
           core/evaluation.py core/updater.py core/validation.py
-          execution/models.py execution/registry.py execution/engine.py
+          execution/models.py execution/policy.py execution/config_validation.py
+          execution/registry.py execution/engine.py
           remediation/engine.py
 
       - name: Tests with coverage
