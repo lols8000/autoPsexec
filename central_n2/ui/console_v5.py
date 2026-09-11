@@ -1921,7 +1921,8 @@ class ConsoleUIV5(ConsoleBase):
         print(f"Timeout: {spec.timeout_seconds}s")
         print(
             f"Transportes: {', '.join(spec.allowed_transports)} | "
-            f"Idempotente: {'SIM' if spec.idempotent else 'NÃO'}"
+            f"Idempotente: {'SIM' if spec.idempotent else 'NÃO'} | "
+            f"Retry: {spec.retry_policy.value}"
         )
         if spec.required_capabilities:
             print(
