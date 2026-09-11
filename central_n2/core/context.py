@@ -17,6 +17,7 @@ class AttendanceContext:
     diagnoses: list[Any] = field(default_factory=list)
     playbook: Any = None
     remediation: Any = None
+    execution: Any = None
     report_path: Path | None = None
 
     @classmethod
@@ -32,6 +33,7 @@ class AttendanceContext:
         self.diagnoses.clear()
         self.playbook = None
         self.remediation = None
+        self.execution = None
         self.report_path = None
 
     def belongs_to(self, host: str | None) -> bool:
