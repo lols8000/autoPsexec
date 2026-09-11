@@ -1,6 +1,6 @@
 [project]
 name = "central-n2"
-version = "5.1.0"
+version = "5.2.0"
 description = "Central de diagnóstico, administração e troubleshooting para suporte N2 em estações Windows"
 requires-python = ">=3.10"
 dependencies = []
