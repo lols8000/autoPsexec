@@ -364,3 +364,17 @@ def test_sensitive_parameters_are_redacted():
 
     assert record.parameters["token"] == "super-secret"
     assert record.public_parameters["token"] == "***"
+
+
+
+def test_reboot_delay_stays_inside_recovery_window(tmp_path: Path):
+    registry = _registry(tmp_path)
+    reboot = registry.get("energy.restart").spec
+    delay = next(
+        item
+        for item in reboot.parameters
+        if item.key == "delay_seconds"
+    )
+
+    assert delay.max_value == 300
+    assert reboot.recovery_timeout_seconds > delay.max_value
