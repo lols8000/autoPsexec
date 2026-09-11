@@ -72,6 +72,11 @@ Preencha conscientemente:
 
 O registry rejeita:
 
+- rollback_strategy sem rollback_handler;
+- rollback validator/preconditions sem rollback_handler;
+- DisconnectMode.TEMPORARY sem after_probe + validator;
+- DisconnectMode.TERMINAL sem may_break_connectivity;
+
 - timeout <= 0;
 - lista de transporte vazia/inválida;
 - ação destrutiva sem confirmação;
@@ -132,6 +137,12 @@ Não adicione rollback “best effort” sem prova de estado.
 Use SelectorKind para parâmetros que podem ser inventariados.
 
 Não faça módulo chamar `input()`. A UI resolve seleção.
+
+## Operações de arquivo
+
+`FileOperationsModule` deve permanecer confinado a `execution.file_roots`.
+
+Nunca substitua o guard de raízes por simples validação de "caminho absoluto". Caminhos com `..` e caminhos fora das raízes devem falhar antes do executor.
 
 ## Configuração corporativa
 
