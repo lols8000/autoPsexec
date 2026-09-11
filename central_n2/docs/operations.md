@@ -1,185 +1,176 @@
-# Operação — Central N2 Workstation 5.1.0
+# Operação — Central N2 Workstation 5.2.0
 
 ## Regra principal
 
-\`\`\`text
-EVIDÊNCIA → DIAGNÓSTICO → REMEDIAÇÃO → VALIDAÇÃO → REGISTRO
-\`\`\`
+```text
+EVIDÊNCIA → DIAGNÓSTICO → PLANO → EXECUÇÃO → VALIDAÇÃO → REGISTRO
+```
 
-Não use a Central como lançador indiscriminado de comandos de reparo.
+A Central não deve ser usada como lançador indiscriminado de comandos.
 
-## 1. Iniciar
+## 1. Selecionar estação
 
-\`\`\`powershell
-python .\central_n2\main.py
-\`\`\`
+Prefira hostname/FQDN.
 
-Confirme a elevação UAC.
+A seleção:
 
-## 2. Selecionar estação
+1. cria novo AttendanceContext;
+2. gera correlation_id;
+3. executa preflight;
+4. seleciona transporte;
+5. coleta capabilities;
+6. coleta snapshot inicial quando possível.
 
-Prefira hostname/FQDN em domínio. A seleção cria um novo \`AttendanceContext\`, gera novo \`correlation_id\`, executa preflight e coleta snapshot inicial quando há transporte válido.
+Não use a Central de Execuções se a sessão não estiver READY.
 
-Leia o estado:
+## 2. Abrir a Central de Execuções
 
-- \`READY_LOCAL\`: execução direta;
-- \`READY_WINRM\`: WinRM autenticado;
-- \`READY_PSEXEC\`: PsExec validado;
-- qualquer outro: investigar antes de tentar remediação.
+Menu:
 
-## 3. Cenário WinRM bloqueado
+```text
+[28] Central de Execuções
+```
 
-Exemplo:
+Também há atalhos `90+` nos menus de diagnóstico.
 
-\`\`\`text
-DNS ............. OK
-Ping ............ OK
-TCP 5985 ........ FAIL
-TCP 445 ......... OK
-ADMIN$ .......... OK
-PsExec .......... OK
-Estado .......... READY_PSEXEC
-\`\`\`
+A tela mostra categorias e permite:
 
-Isso é suportado. Não é necessário abrir 5985 apenas para atender pela Central se a política do ambiente permite PsExec.
+- escolher domínio;
+- buscar ação por texto/tag;
+- desfazer a última ação reversível do atendimento.
 
-## 4. WinRM por IP
+## 3. Escolher parâmetros
 
-WinRM pode falhar por autenticação ao usar IP. Em domínio, prefira hostname/FQDN.
+Parâmetros são tipados.
 
-Não use \`TrustedHosts=*\` como correção genérica.
+Quando existe seletor, a Central inventaria o host e mostra objetos reais. Exemplo:
 
-## 5. Compliance
+```text
+Serviço:
+1 - Print Spooler | Spooler | Running | Automatic
+2 - Windows Update | wuauserv | Running | Manual
+M - Informar manualmente
+```
 
-Interpretação:
+Use entrada manual apenas quando o objeto não aparecer.
 
-| Estado | Ação |
-| --- | --- |
-| PASS | atende ao baseline |
-| FAIL | desvio confirmado |
-| UNKNOWN | não há evidência suficiente; investigar |
-| N/A | controle não exigido pelo baseline |
+## 4. Ler o plano
 
-Nunca trate UNKNOWN como prova de não conformidade.
+Antes da confirmação:
 
-## 6. Operações longas
+```text
+✓ [PASS] Transporte psexec permitido.
+✓ [PASS] Contexto administrativo confirmado.
+✓ [PASS] Capability PnPUtil disponível.
+✗ [FAIL] Winget indisponível.
 
-SFC, DISM, inventário pesado e outras rotinas podem levar minutos. O JobManager mantém feedback e timeout.
+Plano: BLOQUEADO
+```
 
-**Timeout não é cancelamento remoto garantido.**
+Ação bloqueada não é executada.
 
-Antes de repetir uma operação pesada após timeout:
+## 5. Confirmar
 
-1. consulte o estado atual;
-2. verifique processo/serviço/log pertinente;
-3. confirme se a ação ainda está em andamento;
-4. só então decida repetir.
+Ações normais: `SIM`.
 
-## 7. Resultado indeterminado
+Ações de risco elevado:
 
-Se uma ação mutável perder comunicação depois de possivelmente ter sido entregue, a Central marca o resultado como indeterminado.
+```text
+EXECUTAR <hostname>
+```
 
-Procedimento:
+Leia impacto, risco, transportes, retry e rollback antes de confirmar.
 
-\`\`\`text
-não repetir imediatamente
-  ↓
-consultar estado final do recurso
-  ↓
-comparar com objetivo da ação
-  ↓
-se necessário, executar nova remediação consciente
-\`\`\`
+## 6. Resultado
 
-O fallback automático para PsExec fica bloqueado nesse caso para evitar dupla execução.
+Estados:
 
-## 8. Fluxos práticos
+- PASS — objetivo comprovado;
+- FAIL — falha comprovada;
+- UNKNOWN — estado final não comprovado.
 
-### Lentidão
+`CommandResult.indeterminate` nunca deve ser tratado como falha simples para repetir automaticamente.
 
-\`\`\`text
-Saúde → Performance → Disco/Startup → Playbook Lentidão → causa → remediação
-\`\`\`
+## 7. Disconnect temporário
 
-### Rede
+Exemplo: restart de NIC ou reboot.
 
-\`\`\`text
-interface → IP → gateway → DNS → TCP específico
-\`\`\`
+```text
+comando entregue
+ ↓
+conexão cai
+ ↓
+Central aguarda
+ ↓
+SessionManager refresh
+ ↓
+READY novamente
+ ↓
+postcheck
+ ↓
+PASS/FAIL/UNKNOWN
+```
 
-Renovação DHCP é disruptiva; use somente quando a causa justificar.
+Se o host não voltar dentro do prazo, o resultado é UNKNOWN.
 
-### Impressão
+## 8. Shutdown
 
-\`\`\`text
-inventário → fila → Spooler → driver/porta/rede
-\`\`\`
+Shutdown usa disconnect terminal. A Central não espera a máquina voltar.
 
-### Domínio/GPO
+## 9. Rollback
 
-\`\`\`text
-domínio/DC → horário → secure channel → gpresult → gpupdate/repair se necessário
-\`\`\`
+Quando disponível, o menu 28 mostra:
 
-### Windows Update
+```text
+U - Desfazer última execução reversível
+```
 
-\`\`\`text
-status/pendências → causa → reset apenas se justificado → validação dos serviços
-\`\`\`
+Confirmação:
 
-### Disco cheio
+```text
+DESFAZER <hostname>
+```
 
-\`\`\`text
-uso → perfis → estimativa → limpeza segura
-\`\`\`
+Rollback é validado e persistido como nova execução ligada à original.
 
-A limpeza guiada atua em temporários e **não toca a Lixeira nem Downloads**.
+Não existe rollback automático para operações irreversíveis.
 
-## 9. Remediações guiadas
+## 10. Retry
 
-Antes de confirmar, leia impacto e observação de rollback.
+Padrão: `PRE_EXECUTION_ONLY`.
 
-Validações:
+Nunca repita uma mutação apenas porque houve timeout. Antes:
 
-- Spooler: serviço deve estar Running;
-- limpeza: retorno estruturado deve confirmar recuperação;
-- Windows Update: serviços originalmente ativos devem ser restaurados;
-- GPUpdate: execução deve concluir e GPResult pós-ação deve ser coletado.
+1. consulte o estado;
+2. verifique se a ação pode ter sido entregue;
+3. use o postcheck pertinente;
+4. só repita quando houver evidência suficiente.
 
-Validação UNKNOWN significa que o estado final não foi suficientemente comprovado.
+## 11. Catálogos corporativos
 
-## 10. Histórico e diff
+No bootstrap, pacotes/certificados/Registro são validados.
 
-Use o menu de histórico para comparar os dois snapshots de saúde mais recentes. O SQLite persiste dados com \`correlation_id\`.
+Entrada inválida é desabilitada e aparece como warning.
 
-## 11. Relatório
+Não corrija isso liberando shell ou instalador arbitrário.
 
-Gere após o atendimento. O relatório registra:
+## 12. Histórico
 
-- host;
-- usuário quando disponível;
-- problema;
-- diagnóstico;
-- ações;
-- validação;
-- resultado;
-- correlation_id.
+Menu 21 mostra snapshots e execuções recentes.
 
-## 12. GLPI
+Execuções registram:
 
-A API é opcional. O envio exige relatório do atendimento atual e o contexto deve pertencer ao host selecionado.
+- action;
+- validation state;
+- operador;
+- transporte;
+- risco;
+- duração;
+- correlation_id;
+- rollback linkage.
 
-## 13. Jobs
+## 13. GLPI / relatório
 
-O menu Jobs mostra estado, classe, duração e correlation_id. Mutações são serializadas por host.
+O relatório deve refletir o resultado validado, não apenas o comando executado.
 
-## 14. Checklist de encerramento
-
-\`\`\`text
-[ ] causa ou hipótese registrada
-[ ] ação executada apenas quando justificada
-[ ] resultado não ficou indeterminado sem investigação
-[ ] validação pós-ação realizada
-[ ] relatório gerado
-[ ] chamado atualizado quando aplicável
-\`\`\`
+Ao registrar no GLPI, use correlation_id para ligar diagnóstico, jobs e execuções.
