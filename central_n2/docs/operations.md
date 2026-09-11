@@ -43,7 +43,7 @@ A tela mostra categorias e permite:
 
 Parâmetros são tipados.
 
-Quando existe seletor, a Central inventaria o host e mostra objetos reais. Exemplo:
+Quando existe seletor, a Central inventaria o host e mostra objetos reais. Perfis usam inventário leve, sem cálculo recursivo de tamanho, e sessões usam dados estruturados de sessões interativas em vez de parsing textual de `quser`. Exemplo:
 
 ```text
 Serviço:
@@ -132,6 +132,8 @@ DESFAZER <hostname>
 ```
 
 Rollback é validado e persistido como nova execução ligada à original. Um rollback bem-sucedido consome a disponibilidade de rollback do registro pai. Guardas do rollback são avaliadas separadamente das preconditions da execução original.
+
+A Central mantém uma pilha LIFO das execuções reversíveis do atendimento. Se uma ação não reversível for executada depois, a reversível anterior continua disponível.
 
 Não existe rollback automático para operações irreversíveis.
 
