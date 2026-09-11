@@ -143,6 +143,29 @@ class ExecutionAction:
 
 
 @dataclass(slots=True)
+class RecoveryResult:
+    attempted: bool
+    ready: bool
+    attempts: int = 0
+    elapsed_seconds: float = 0.0
+    transport: str | None = None
+    state: str | None = None
+    error: str | None = None
+
+
+@dataclass(slots=True)
+class ExecutionPlan:
+    action: ExecutionAction
+    host: str
+    parameters: dict[str, Any]
+    policy: Any
+
+    @property
+    def allowed(self) -> bool:
+        return bool(getattr(self.policy, "allowed", False))
+
+
+@dataclass(slots=True)
 class ExecutionRecord:
     action: ExecutionAction
     host: str
