@@ -1,10 +1,13 @@
 #define MyAppName "Central N2 Workstation"
-#define MyAppVersion "5.1.0"
+#define MyAppVersion "5.2.0"
 #define MyAppExeName "CentralN2.exe"
 [Setup]
 AppId={{18E9E450-3509-4A3C-9CB7-6C29C5100D20}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}.0
+VersionInfoDescription={#MyAppName}
+UninstallDisplayIcon={app}\{#MyAppExeName}
 DefaultDirName={autopf}\CentralN2
 DefaultGroupName=Central N2
 OutputDir=Output

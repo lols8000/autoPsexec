@@ -1,4 +1,4 @@
-# Segurança — Central N2 Workstation 5.1.0
+# Segurança — Central N2 Workstation 5.2.0
 
 ## Modelo de confiança
 
@@ -8,13 +8,85 @@ Pressupostos:
 
 - operador autorizado;
 - estação administrativa confiável;
-- rede e hosts dentro do escopo permitido;
-- credenciais tratadas pela política corporativa;
-- PsExec/Sysinternals homologados quando utilizados.
+- rede/hosts dentro do escopo permitido;
+- política corporativa respeitada;
+- PsExec homologado quando utilizado.
 
-## Elevação
+## Princípio de menor superfície
 
-\`main.py\` solicita UAC quando necessário. A Central não contorna a política de elevação do Windows.
+A Central de Execuções não expõe:
+
+- shell PowerShell livre;
+- shell CMD livre;
+- editor genérico de Registro;
+- instalador arbitrário informado em runtime;
+- PFX/chave privada;
+- exclusão recursiva genérica.
+
+Poder operacional deve entrar como ação tipada, testada e auditável.
+
+## Policy antes da execução
+
+Toda ação passa por:
+
+- sessão READY;
+- transporte permitido;
+- privilege;
+- capabilities;
+- custom preconditions.
+
+Bloqueio ocorre antes da confirmação e antes do handler.
+
+## Privilege
+
+Níveis suportados:
+
+- ANY;
+- ADMIN;
+- SYSTEM;
+- USER_CONTEXT.
+
+Winget, por exemplo, pode exigir contexto de usuário administrativo e ser bloqueado sob SYSTEM/PsExec.
+
+## Retry
+
+`RetryPolicy` é parte do contrato.
+
+Padrão: `PRE_EXECUTION_ONLY`.
+
+`SAFE_TRANSIENT` só é válido para ação idempotente.
+
+Resultado indeterminado não sofre repetição automática cega.
+
+## Disconnect esperado
+
+Ações que derrubam a própria conectividade devem declarar DisconnectMode.
+
+TEMPORARY exige recovery + postcheck.
+
+TERMINAL representa efeito final esperado, como shutdown.
+
+## Rollback
+
+Rollback só é oferecido quando:
+
+- before probe captura estado suficiente;
+- existe operação tecnicamente inversa;
+- after probe consegue validar restauração.
+
+A Central não simula rollback para ações irreversíveis.
+
+## Allowlist corporativa
+
+`packages`, `certificates` e `registry_actions` são validados no bootstrap.
+
+Regras importantes:
+
+- pacote: somente tipo homologado;
+- certificado: somente .cer/.crt público e stores permitidos;
+- Registro: somente HKLM e tipos permitidos.
+
+Entrada inválida é removida do catálogo efetivo.
 
 ## Segredos
 
@@ -26,101 +98,59 @@ Nunca versione:
 - Authorization headers;
 - certificados privados;
 - credenciais de domínio;
-- URLs internas sensíveis.
+- caminhos/URLs internos sensíveis.
 
-Use \`settings.local.json\`, que não deve ser commitado.
+Use `settings.local.json`.
 
 ## Auditoria e redaction
 
-O logger aplica redaction em nomes/valores sensíveis e é compacto por padrão.
+`ExecutionRecord.audit_payload()` e SQLite aplicam redaction.
 
-\`logging.verbose_payloads=false\` evita persistir command/stdout/data completos em cada resultado. Habilite payload verboso somente quando houver necessidade operacional e proteção adequada do diretório de logs.
+Parâmetros marcados `sensitive=True` são substituídos por `***`.
 
-## WinRM
+Campos comuns como password/token/secret também passam pelo redactor central.
 
-A Central não considera WinRM pronto apenas porque \`Test-WSMan\` respondeu. O preflight também valida \`Invoke-Command\`.
+## WinRM e PsExec
 
 Evite:
 
-- \`TrustedHosts=*\`;
-- desabilitar Firewall/Defender para “fazer funcionar”;
-- habilitar listener fora da política corporativa.
+- `TrustedHosts=*`;
+- desligar Firewall/Defender para “fazer funcionar”;
+- abrir listener fora da política;
+- assumir que ADMIN$ implica PsExec funcional.
 
-## PsExec
-
-PsExec é suportado, mas possui impacto administrativo relevante:
-
-- usa SMB/ADMIN$;
-- pode criar serviço remoto temporário;
-- pode ser bloqueado por EDR;
-- contexto SYSTEM pode diferir do usuário interativo;
-- aplicativos dependentes de perfil, como Winget, podem não estar disponíveis.
-
-A Central não baixa PsExec automaticamente.
-
-## Fallback e idempotência
-
-A regra de segurança mais importante da 5.1.0:
-
-**consulta pode repetir; mutação não pode repetir cegamente.**
-
-Para mutações, fallback WinRM → PsExec só ocorre quando a falha é classificada como pré-execução. Quando a ação pode ter chegado ao destino, o resultado vira indeterminado e a repetição automática é bloqueada.
-
-## Entrada do operador
-
-Entradas interpoladas em PowerShell devem usar validadores/quoting centralizados. Não exponha shell remoto livre na UI.
-
-## Winget
-
-Operações do Winget verificam \`$LASTEXITCODE\`. Exit code não-zero deve aparecer como falha, mesmo que o PowerShell em si não tenha lançado exceção automaticamente.
-
-## Remediação
-
-Ações de escrita devem possuir:
-
-- \`ActionSpec\`;
-- classe de operação;
-- confirmação quando aplicável;
-- timeout;
-- resultado auditável;
-- validador pós-ação quando o estado final for verificável.
+PsExec pode executar em contexto diferente do usuário interativo; policy/capabilities devem refletir isso.
 
 ## Concorrência
 
-O JobManager serializa operações não somente-leitura por host, evitando sobreposição como DISM + cleanup + reboot na mesma estação.
+JobManager serializa mutações por host.
+
+Isso evita sobreposição de operações como DISM, cleanup, alteração de rede e reboot na mesma estação.
 
 ## Persistência
 
-SQLite, relatórios e logs podem conter dados de infraestrutura. Proteja com ACL e política de retenção.
+SQLite e relatórios podem conter infraestrutura. Proteja com ACL e retenção.
 
-O banco passa por \`quick_check\` na inicialização e usa migrations versionadas; não edite o schema manualmente em produção.
-
-## GLPI API
-
-Tokens ficam apenas em configuração local. A API é desabilitada por padrão.
-
-## Supply chain / distribuição
-
-- dependências de CI fixadas;
-- GitHub Actions fixadas por SHA;
-- UPX desativado;
-- release gera SHA256SUMS;
-- updater valida SHA-256 quando o asset publica digest;
-- download é promovido apenas após validação;
-- assinatura Authenticode pode ser aplicada pelo CI sem armazenar certificado no repositório.
+Schema é migrado automaticamente e passa por quick_check.
 
 ## Repositório público
 
-Não commite logs reais, dumps, relatórios, banco SQLite, nomes de usuários, inventários internos ou arquivos de configuração local.
+Nunca commite:
+
+- logs reais;
+- banco SQLite;
+- inventários;
+- nomes de usuários;
+- dumps;
+- relatórios;
+- settings.local.json.
 
 ## Incidente
 
-Em suspeita de uso indevido:
-
 1. interrompa a operação;
-2. preserve logs e banco;
-3. identifique \`correlation_id\`;
-4. identifique estação administrativa e alvos;
-5. revise jobs/remediações;
+2. preserve logs/banco;
+3. identifique correlation_id;
+4. identifique operador, host e action key;
+5. revise execution history e jobs;
 6. revise credenciais;
-7. acione o processo corporativo de segurança.
+7. acione segurança corporativa.

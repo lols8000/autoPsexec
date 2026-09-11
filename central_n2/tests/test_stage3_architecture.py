@@ -69,6 +69,14 @@ def test_database_uses_versioned_schema_and_correlation(tmp_path: Path):
 
     assert version == CentralDatabase.SCHEMA_VERSION
     assert "correlation_id" in columns
+    with sqlite3.connect(database.path) as connection:
+        execution_tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    assert "executions" in execution_tables
     assert database.integrity_check() is True
 
     database.save_snapshot(
@@ -110,6 +118,11 @@ def test_database_prunes_all_operational_tables(tmp_path: Path):
             ("OLDPC", old, "x", 1, "{}"),
         )
         connection.execute(
+            "INSERT INTO executions(host,created_at,action,validation_state,payload) "
+            "VALUES(?,?,?,?,?)",
+            ("OLDPC", old, "x", "PASS", "{}"),
+        )
+        connection.execute(
             "INSERT INTO reports(host,created_at,format,payload) "
             "VALUES(?,?,?,?)",
             ("OLDPC", old, "json", "{}"),
@@ -123,6 +136,7 @@ def test_database_prunes_all_operational_tables(tmp_path: Path):
             "jobs",
             "findings",
             "remediations",
+            "executions",
             "reports",
         )
     )
@@ -224,6 +238,7 @@ def test_v5_bootstrap_accepts_injected_settings_and_has_single_state(tmp_path: P
         assert ui.context.diagnoses == []
         assert ui.context.playbook is None
         assert ui.context.remediation is None
+        assert ui.context.execution is None
         assert ui.context.report_path is None
         assert ui.updates_enabled is False
 
@@ -240,3 +255,23 @@ def test_v5_bootstrap_accepts_injected_settings_and_has_single_state(tmp_path: P
     finally:
         ui.jobs.shutdown()
         ui.job_manager.shutdown()
+
+
+
+def test_database_persists_execution_history(tmp_path: Path):
+    database = CentralDatabase(tmp_path / "central.db")
+    database.save_execution(
+        "PC01",
+        "network.flush_dns",
+        "PASS",
+        {"action": "network.flush_dns", "result": "ok"},
+        correlation_id="EXEC001",
+    )
+
+    rows = database.recent_executions("PC01", limit=5)
+
+    assert len(rows) == 1
+    assert rows[0]["action"] == "network.flush_dns"
+    assert rows[0]["validation_state"] == "PASS"
+    assert rows[0]["correlation_id"] == "EXEC001"
+    assert rows[0]["payload"]["result"] == "ok"

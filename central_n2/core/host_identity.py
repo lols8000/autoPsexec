@@ -40,7 +40,7 @@ class HostIdentity:
                 continue
             try:
                 for item in socket.getaddrinfo(name, None):
-                    addresses.add(item[4][0].split("%", 1)[0])
+                    addresses.add(str(item[4][0]).split("%", 1)[0])
             except OSError:
                 continue
         return addresses
@@ -50,7 +50,7 @@ class HostIdentity:
         values: set[str] = set()
         try:
             for item in socket.getaddrinfo(host, None):
-                values.add(item[4][0].split("%", 1)[0])
+                values.add(str(item[4][0]).split("%", 1)[0])
         except OSError:
             pass
         return tuple(sorted(values))

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from core.executor import RemoteExecutor
 from core.result import CommandResult
-from core.validation import quote_powershell_literal, validate_port
+from core.validation import (
+    quote_powershell_literal,
+    validate_port,
+    validate_safe_name,
+)
 
 
 class NetworkModule:
@@ -10,15 +14,34 @@ class NetworkModule:
         self.executor = executor
 
     def adapters(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 Get-NetAdapter |
     Sort-Object ifIndex |
     Select-Object Name,InterfaceDescription,Status,MacAddress,LinkSpeed,ifIndex
 """
         return self.executor.execute_powershell_json(host, script)
 
+    def adapter_status(
+        self,
+        host: str,
+        adapter_name: str,
+    ) -> CommandResult:
+        safe = quote_powershell_literal(
+            validate_safe_name(adapter_name, label="Adaptador")
+        )
+        script = f"""
+$a = Get-NetAdapter -Name {safe} -ErrorAction Stop
+[pscustomobject]@{{
+    Name = $a.Name
+    Status = $a.Status.ToString()
+    InterfaceDescription = $a.InterfaceDescription
+    ifIndex = $a.ifIndex
+}}
+"""
+        return self.executor.execute_powershell_json(host, script)
+
     def ip_configuration(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 Get-NetIPConfiguration | ForEach-Object {
     [pscustomobject]@{
         InterfaceAlias = $_.InterfaceAlias
@@ -34,6 +57,7 @@ Get-NetIPConfiguration | ForEach-Object {
         return self.executor.execute_mutating_cmd(
             host,
             "ipconfig /release && ipconfig /renew",
+            timeout=180,
         )
 
     def flush_dns(self, host: str) -> CommandResult:
@@ -42,11 +66,92 @@ Get-NetIPConfiguration | ForEach-Object {
             "Clear-DnsClientCache -ErrorAction Stop",
         )
 
+    def register_dns(self, host: str) -> CommandResult:
+        return self.executor.execute_mutating_cmd(
+            host,
+            "ipconfig /registerdns",
+            timeout=120,
+        )
+
     def reset_winsock(self, host: str) -> CommandResult:
-        return self.executor.execute_mutating_cmd(host, "netsh winsock reset")
+        return self.executor.execute_mutating_cmd(
+            host,
+            "netsh winsock reset",
+        )
 
     def reset_tcpip(self, host: str) -> CommandResult:
-        return self.executor.execute_mutating_cmd(host, "netsh int ip reset")
+        return self.executor.execute_mutating_cmd(
+            host,
+            "netsh int ip reset",
+        )
+
+    def clear_arp(self, host: str) -> CommandResult:
+        return self.executor.execute_mutating_cmd(
+            host,
+            "arp -d *",
+            timeout=60,
+        )
+
+    def set_adapter_state(
+        self,
+        host: str,
+        adapter_name: str,
+        *,
+        enabled: bool,
+    ) -> CommandResult:
+        safe = quote_powershell_literal(
+            validate_safe_name(adapter_name, label="Adaptador")
+        )
+        cmd = "Enable-NetAdapter" if enabled else "Disable-NetAdapter"
+        script = f"""
+{cmd} -Name {safe} -Confirm:$false -ErrorAction Stop
+Start-Sleep -Milliseconds 500
+$a = Get-NetAdapter -Name {safe} -ErrorAction Stop
+[pscustomobject]@{{
+    Name = $a.Name
+    Status = $a.Status.ToString()
+    Enabled = [bool]($a.Status -ne 'Disabled')
+}}
+"""
+        return self.executor.execute_mutating_powershell_json(
+            host,
+            script,
+            timeout=90,
+        )
+
+    def restart_adapter(
+        self,
+        host: str,
+        adapter_name: str,
+    ) -> CommandResult:
+        safe = quote_powershell_literal(
+            validate_safe_name(adapter_name, label="Adaptador")
+        )
+        script = f"""
+$name = {safe}
+$payload = @"
+Start-Sleep -Seconds 2
+Disable-NetAdapter -Name '$name' -Confirm:$false -ErrorAction Stop
+Start-Sleep -Seconds 3
+Enable-NetAdapter -Name '$name' -Confirm:$false -ErrorAction Stop
+"@
+$encoded = [Convert]::ToBase64String(
+    [Text.Encoding]::Unicode.GetBytes($payload)
+)
+$p = Start-Process powershell.exe -ArgumentList @(
+    '-NoProfile','-NonInteractive','-EncodedCommand',$encoded
+) -WindowStyle Hidden -PassThru
+[pscustomobject]@{{
+    Scheduled = $true
+    ProcessId = $p.Id
+    Adapter = $name
+}}
+"""
+        return self.executor.execute_mutating_powershell_json(
+            host,
+            script,
+            timeout=60,
+        )
 
     def wifi(self, host: str, enable: bool) -> CommandResult:
         action = "Enable-NetAdapter" if enable else "Disable-NetAdapter"
@@ -59,10 +164,10 @@ if (-not $wifi) {{ throw 'Nenhum adaptador Wi-Fi encontrado.' }}
 $wifi | {action} -Confirm:$false -ErrorAction Stop
 $wifi | Select-Object Name,Status,MacAddress
 """
-        return self.executor.execute_mutating_powershell(host, script)
+        return self.executor.execute_mutating_powershell_json(host, script)
 
     def arp_table(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 Get-NetNeighbor |
     Sort-Object InterfaceIndex,IPAddress |
     Select-Object InterfaceIndex,IPAddress,LinkLayerAddress,State
@@ -70,7 +175,7 @@ Get-NetNeighbor |
         return self.executor.execute_powershell_json(host, script)
 
     def connections(self, host: str) -> CommandResult:
-        script = """
+        script = r"""
 Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue |
     Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,OwningProcess |
     Sort-Object OwningProcess

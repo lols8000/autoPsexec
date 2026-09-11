@@ -11,17 +11,21 @@ from core.config import ConfigLoader
 from core.jobs import JobManager, OperationClass, ResponsiveJobRunner
 from core.result import CommandResult
 from core.validation import validate_host, validate_process_name, validate_windows_path
+from modules.certificates import CertificatesModule
 from modules.crashes import CrashesModule
 from modules.devices import DevicesModule
 from modules.diagnostic_package import DiagnosticPackageModule
 from modules.diagnostics import DiagnosticsModule
 from modules.disk import DiskModule
+from modules.file_ops import FileOperationsModule
 from modules.domain import DomainModule
 from modules.glpi import GLPIModule
 from modules.health import HealthModule, calculate_health_score
 from modules.network import NetworkModule
+from modules.packages import PackagesModule
 from modules.performance import PerformanceModule
 from modules.printers import PrintersModule
+from modules.registry_actions import RegistryActionsModule
 from modules.repair import RepairModule
 from modules.security import SecurityModule
 from modules.software import SoftwareModule
@@ -101,6 +105,10 @@ class ConsoleBase:
             self.settings.get("sysinternals_dir", r"C:\Sysinternals"),
         )
         self.tools = WorkstationToolsModule(executor)
+        self.packages = PackagesModule(executor, self.settings)
+        self.certificates = CertificatesModule(executor, self.settings)
+        self.registry_actions = RegistryActionsModule(executor, self.settings)
+        self.file_ops = FileOperationsModule(executor)
 
     @staticmethod
     def clear() -> None:
@@ -113,6 +121,15 @@ class ConsoleBase:
     @staticmethod
     def confirm(text: str) -> bool:
         return input(f"\n⚠ {text} [digite SIM]: ").strip().upper() == "SIM"
+
+    def execution_shortcut(self, category: str) -> bool:
+        opener = getattr(self, "open_execution_category", None)
+        if not callable(opener):
+            print("Central de Execuções indisponível nesta interface.")
+            self.pause()
+            return False
+        opener(category)
+        return True
 
     def require_host(self) -> bool:
         if self.host:
@@ -382,9 +399,13 @@ class ConsoleBase:
             "PERFORMANCE\n"
             "1 - Amostragem rápida (8s)\n"
             "2 - Amostragem detalhada (20s)\n"
+            "90 - Executar ações de processos\n"
             "0 - Voltar"
         )
         option = input("Opção: ").strip()
+        if option == "90":
+            self.execution_shortcut("processes")
+            return
         if option == "1":
             self.execute(
                 ActionSpec.read(
@@ -416,9 +437,13 @@ class ConsoleBase:
             "1 - SFC\n2 - DISM CheckHealth\n3 - DISM ScanHealth\n"
             "4 - DISM RestoreHealth\n5 - Analisar Component Store\n"
             "6 - Limpar Component Store\n7 - CHKDSK online\n"
-            "8 - Verificar WMI\n0 - Voltar"
+            "8 - Verificar WMI\n90 - Central de Execuções Windows\n"
+            "0 - Voltar"
         )
         option = input("Opção: ").strip()
+        if option == "90":
+            self.execution_shortcut("windows")
+            return
         actions = {
             "1": (
                 ActionSpec(
@@ -510,9 +535,13 @@ class ConsoleBase:
             "DISPOSITIVOS / DRIVERS\n"
             "1 - Dispositivos com erro\n2 - Drivers\n"
             "3 - USB presentes\n4 - Reexaminar dispositivos\n"
-            "5 - Exportar drivers\n0 - Voltar"
+            "5 - Exportar drivers\n90 - Execuções de drivers/dispositivos\n"
+            "0 - Voltar"
         )
         option = input("Opção: ").strip()
+        if option == "90":
+            self.execution_shortcut("devices")
+            return
         actions = {
             "1": (
                 ActionSpec.read(
@@ -621,9 +650,13 @@ class ConsoleBase:
         print(
             "SEGURANÇA\n"
             "1 - Postura de segurança\n"
-            "2 - Ameaças recentes\n0 - Voltar"
+            "2 - Ameaças recentes\n"
+            "90 - Execuções Defender\n0 - Voltar"
         )
         option = input("Opção: ").strip()
+        if option == "90":
+            self.execution_shortcut("security")
+            return
         if option == "1":
             self.execute(
                 "Coletando postura de segurança",
@@ -647,9 +680,13 @@ class ConsoleBase:
         print(
             "REDE\n1 - Interfaces\n2 - IP/Gateway/DNS\n"
             "3 - ARP\n4 - Conexões TCP\n5 - Flush DNS\n"
-            "6 - Renovar DHCP\n0 - Voltar"
+            "6 - Renovar DHCP\n90 - Central de Execuções de Rede\n"
+            "0 - Voltar"
         )
         option = input("Opção: ").strip()
+        if option == "90":
+            self.execution_shortcut("network")
+            return
         actions = {
             "1": (
                 ActionSpec.read("network.adapters", "Interfaces", timeout_seconds=180),
@@ -705,9 +742,13 @@ class ConsoleBase:
         print(
             "USUÁRIOS / PERFIS\n1 - Sessões\n"
             "2 - Administradores locais\n3 - Perfis e tamanho\n"
+            "90 - Execuções de usuários/perfis\n"
             "0 - Voltar"
         )
         option = input("Opção: ").strip()
+        if option == "90":
+            self.execution_shortcut("users")
+            return
         actions = {
             "1": (
                 ActionSpec.read("users.sessions", "Sessões", timeout_seconds=180),
@@ -741,9 +782,17 @@ class ConsoleBase:
         print(
             "SOFTWARE / GLPI\n1 - Software instalado\n"
             "2 - Winget\n3 - GLPI status\n"
-            "4 - Forçar inventário GLPI\n0 - Voltar"
+            "4 - Forçar inventário GLPI\n"
+            "90 - Execuções de Software\n91 - Execuções GLPI\n"
+            "0 - Voltar"
         )
         option = input("Opção: ").strip()
+        if option == "90":
+            self.execution_shortcut("software")
+            return
+        if option == "91":
+            self.execution_shortcut("glpi")
+            return
         if option == "1":
             spec = ActionSpec.read(
                 "software.inventory",
@@ -784,9 +833,13 @@ class ConsoleBase:
         self.clear()
         print(
             "IMPRESSORAS\n1 - Inventário\n2 - Fila\n"
-            "3 - Reiniciar Spooler\n0 - Voltar"
+            "3 - Reiniciar Spooler\n90 - Execuções de Impressão\n"
+            "0 - Voltar"
         )
         option = input("Opção: ").strip()
+        if option == "90":
+            self.execution_shortcut("printers")
+            return
         if option == "1":
             self.execute(
                 "Inventariando impressoras",
@@ -821,9 +874,13 @@ class ConsoleBase:
         self.clear()
         print(
             "DOMÍNIO / GPO\n1 - Status domínio\n"
-            "2 - GPResult\n3 - GPUpdate\n0 - Voltar"
+            "2 - GPResult\n3 - GPUpdate\n"
+            "90 - Execuções de Domínio/GPO\n0 - Voltar"
         )
         option = input("Opção: ").strip()
+        if option == "90":
+            self.execution_shortcut("domain")
+            return
         if option == "1":
             self.execute(
                 "Verificando domínio",
@@ -858,9 +915,13 @@ class ConsoleBase:
             "DISCO / ARMAZENAMENTO / BATERIA\n"
             "1 - Espaço e volumes\n2 - Discos físicos / saúde\n"
             "3 - Bateria\n4 - Perfis por tamanho\n"
-            "5 - Estimar limpeza\n0 - Voltar"
+            "5 - Estimar limpeza\n90 - Execuções de Disco/Limpeza\n"
+            "0 - Voltar"
         )
         option = input("Opção: ").strip()
+        if option == "90":
+            self.execution_shortcut("disk")
+            return
         actions = {
             "1": ("Analisando volumes", self.disk.space, OperationClass.READ_ONLY),
             "2": ("Analisando discos físicos", self.storage.physical_disks, OperationClass.READ_ONLY),
@@ -891,9 +952,23 @@ class ConsoleBase:
             "FERRAMENTAS AVANÇADAS\n1 - Certificados\n"
             "2 - Unidades mapeadas\n3 - Compartilhamentos locais\n"
             "4 - Proxy\n5 - Ativação Windows\n"
-            "6 - Logons recentes\n0 - Voltar"
+            "6 - Logons recentes\n"
+            "90 - Pacotes corporativos\n"
+            "91 - Certificados homologados\n"
+            "92 - Registro homologado\n"
+            "93 - Operações de arquivos\n"
+            "0 - Voltar"
         )
         option = input("Opção: ").strip()
+        shortcuts = {
+            "90": "packages",
+            "91": "certificates",
+            "92": "registry",
+            "93": "files",
+        }
+        if option in shortcuts:
+            self.execution_shortcut(shortcuts[option])
+            return
         actions = {
             "1": ("Certificados", self.tools.certificates),
             "2": ("Unidades mapeadas", self.tools.mapped_drives),
@@ -1013,9 +1088,21 @@ class ConsoleBase:
             "ENERGIA / PROCESSOS / SERVIÇOS\n"
             "1 - Processos\n2 - Serviços\n"
             "3 - Reiniciar estação\n4 - Desligar estação\n"
-            "5 - Enviar mensagem\n0 - Voltar"
+            "5 - Enviar mensagem\n"
+            "90 - Execuções de Processos\n"
+            "91 - Execuções de Serviços\n"
+            "92 - Execuções de Energia/Sessões\n"
+            "0 - Voltar"
         )
         option = input("Opção: ").strip()
+        shortcuts = {
+            "90": "processes",
+            "91": "services",
+            "92": "energy",
+        }
+        if option in shortcuts:
+            self.execution_shortcut(shortcuts[option])
+            return
         if option == "1":
             self.execute(
                 "Listando processos",

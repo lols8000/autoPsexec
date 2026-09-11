@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import getpass
 import json
+import re
+import time
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +21,18 @@ from core.validation import validate_host
 from core.version import __version__
 from diagnostics.correlation import CorrelationEngine
 from diagnostics.engine import DiagnosticEngine
+from execution import (
+    ExecutionBlockedError,
+    ExecutionDependencies,
+    ExecutionEngine,
+    ExecutionPolicyContext,
+    ParameterKind,
+    PolicyState,
+    RecoveryResult,
+    RiskLevel,
+    SelectorKind,
+    build_execution_registry,
+)
 from integrations.glpi.client import GLPIClient, GLPIError
 from modules.compliance import evaluate_compliance
 from modules.health import calculate_health_score
@@ -67,6 +82,7 @@ class ConsoleUIV5(ConsoleBase):
         "[25] GLPI API",
         "[26] Remediações guiadas",
         "[27] Perfil / Baseline",
+        "[28] Central de Execuções",
         "[0] Sair",
     )
 
@@ -122,6 +138,31 @@ class ConsoleUIV5(ConsoleBase):
         self.playbook_analyzer = PlaybookAnalyzer(self.engine)
         self.playbooks = builtin_playbooks()
         self.remediation_engine = RemediationEngine()
+        self.execution_registry = build_execution_registry(
+            ExecutionDependencies(
+                system=self.system,
+                network=self.network,
+                software=self.software,
+                printers=self.printers,
+                devices=self.devices,
+                domain=self.domain,
+                users=self.users,
+                disk=self.disk,
+                glpi=self.glpi,
+                health=self.health,
+                security=self.security,
+                updates=self.updates,
+                repair=self.repair,
+                packages=self.packages,
+                certificates=self.certificates,
+                registry_actions=self.registry_actions,
+                files=self.file_ops,
+            )
+        )
+        self.execution_engine = ExecutionEngine(
+            self.execution_registry,
+            remediation_engine=self.remediation_engine,
+        )
         self.report_builder = SupportReportBuilder()
         self.report_exporter = ReportExporter(root / "reports" / "support")
 
@@ -166,6 +207,7 @@ class ConsoleUIV5(ConsoleBase):
             "25": self.menu_glpi_api,
             "26": self.menu_remediations,
             "27": self.menu_baseline,
+            "28": self.menu_execution,
         }
 
     def run(self) -> None:
@@ -925,6 +967,37 @@ class ConsoleUIV5(ConsoleBase):
                 f"[{record.get('correlation_id') or '-'}]"
             )
 
+        print("\nEXECUÇÕES RECENTES:")
+        executions = self.db.recent_executions(
+            self.host,
+            limit=10,
+        )
+        if not executions:
+            print("Nenhuma execução registrada.")
+        for item in executions:
+            rollback_marker = (
+                f" rollback-of=#{item.get('rollback_of')}"
+                if item.get("is_rollback")
+                else ""
+            )
+            duration = item.get("duration_ms")
+            duration_text = (
+                f"{int(duration) / 1000:.1f}s"
+                if duration is not None
+                else "-"
+            )
+            print(
+                f"#{item['id']} {item['created_at']} | "
+                f"{item['validation_state']:<7} | "
+                f"{item.get('risk') or '-':<8} | "
+                f"{item.get('transport') or '-':<7} | "
+                f"{duration_text:<7} | "
+                f"{item['action']} | "
+                f"{item.get('operator') or '-'} | "
+                f"{item.get('correlation_id') or '-'}"
+                f"{rollback_marker}"
+            )
+
         print("\nDIFF DOS DOIS ÚLTIMOS HEALTH:")
         changes = self.db.diff_latest(self.host, kind="health")
         if not changes:
@@ -962,7 +1035,31 @@ class ConsoleUIV5(ConsoleBase):
         )
 
         validation: Any = self.context.health_snapshot
-        if self.context.remediation:
+        if self.context.execution:
+            execution = self.context.execution
+            actions.append(
+                f"Execução: {execution.action.title} — "
+                f"{execution.remediation.validation.status.value}"
+            )
+            validation = {
+                "type": "execution",
+                "action": execution.action.key,
+                "action_version": execution.action.action_version,
+                "risk": execution.action.risk.value,
+                "transport": execution.remediation.command_result.transport,
+                "operator": execution.operator,
+                "duration_ms": execution.duration_ms,
+                "parameters": execution.public_parameters,
+                "status": execution.remediation.validation.status.value,
+                "message": execution.remediation.validation.message,
+                "evidence": execution.remediation.validation.evidence,
+                "recovery": execution.recovery,
+                "rollback_available": execution.rollback_available,
+                "rollback_performed": (
+                    execution.rollback_result is not None
+                ),
+            }
+        elif self.context.remediation:
             remediation = self.context.remediation
             actions.append(
                 f"Remediação: {remediation.spec.title} — "
@@ -1413,6 +1510,778 @@ class ConsoleUIV5(ConsoleBase):
                 )
 
         self.pause()
+
+    @staticmethod
+    def _execution_evidence(value: Any) -> Any:
+        if isinstance(value, CommandResult):
+            if value.data is not None:
+                return value.data
+            return {
+                "success": value.success,
+                "transport": value.transport,
+                "stdout": value.stdout,
+                "stderr": value.stderr,
+                "indeterminate": value.indeterminate,
+            }
+        return value
+
+    def _execution_policy_context(self) -> ExecutionPolicyContext:
+        if not self.context.session:
+            raise ExecutionBlockedError(
+                "Sessão lógica não está disponível."
+            )
+        return ExecutionPolicyContext.from_session(
+            self.context.session
+        )
+
+    def _recover_execution_host(
+        self,
+        host: str,
+        timeout_seconds: int,
+        delay_seconds: int,
+    ) -> RecoveryResult:
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+
+        started = time.monotonic()
+        attempts = 0
+        last_error: str | None = None
+        last_state: str | None = None
+
+        while time.monotonic() - started < timeout_seconds:
+            attempts += 1
+            try:
+                session = self.sessions.open(
+                    host,
+                    refresh=True,
+                )
+                last_state = str(
+                    session.connectivity.get("state") or ""
+                )
+                if session.ready:
+                    self.context.session = session
+                    return RecoveryResult(
+                        attempted=True,
+                        ready=True,
+                        attempts=attempts,
+                        elapsed_seconds=round(
+                            time.monotonic() - started,
+                            2,
+                        ),
+                        transport=session.transport,
+                        state=last_state,
+                    )
+            except Exception as exc:
+                last_error = (
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+            time.sleep(5)
+
+        return RecoveryResult(
+            attempted=True,
+            ready=False,
+            attempts=attempts,
+            elapsed_seconds=round(
+                time.monotonic() - started,
+                2,
+            ),
+            state=last_state,
+            error=last_error or "Prazo de recuperação excedido.",
+        )
+
+    @staticmethod
+    def _list_payload(result: CommandResult) -> list[dict[str, Any]]:
+        data = result.data
+        if isinstance(data, list):
+            return [
+                item
+                for item in data
+                if isinstance(item, dict)
+            ]
+        if isinstance(data, dict):
+            return [data]
+        return []
+
+    def _selector_options(
+        self,
+        selector: SelectorKind,
+        parameter_key: str,
+    ) -> list[tuple[Any, str]]:
+        if not self.host:
+            return []
+
+        def load(label: str, callback):
+            try:
+                return self.jobs.run(
+                    label,
+                    self._trace(
+                        callback,
+                        action=f"execution.selector.{selector.value.casefold()}",
+                    ),
+                    timeout=300,
+                    operation_class=OperationClass.READ_ONLY,
+                    host=self.host,
+                    correlation_id=self.context.correlation_id,
+                )
+            except Exception:
+                return None
+
+        options: list[tuple[Any, str]] = []
+
+        if selector is SelectorKind.PROCESS:
+            result = load(
+                "Carregando processos",
+                lambda: self.system.list_processes(
+                    self.host,
+                    100,
+                ),
+            )
+            if isinstance(result, CommandResult) and result.success:
+                for item in self._list_payload(result):
+                    name = item.get("Name")
+                    pid = item.get("Id")
+                    if name is None or pid is None:
+                        continue
+                    value = (
+                        int(pid)
+                        if parameter_key == "pid"
+                        else str(name)
+                    )
+                    memory = item.get("WorkingSet")
+                    detail = (
+                        f"{name} | PID {pid}"
+                        + (
+                            f" | RAM {int(memory) // 1048576} MB"
+                            if isinstance(memory, (int, float))
+                            else ""
+                        )
+                    )
+                    options.append((value, detail))
+
+        elif selector is SelectorKind.SERVICE:
+            result = load(
+                "Carregando serviços",
+                lambda: self.system.list_services(self.host),
+            )
+            if isinstance(result, CommandResult) and result.success:
+                for item in self._list_payload(result):
+                    name = item.get("Name")
+                    if not name:
+                        continue
+                    options.append(
+                        (
+                            str(name),
+                            (
+                                f"{item.get('DisplayName') or name} | "
+                                f"{name} | {item.get('Status')} | "
+                                f"{item.get('StartType')}"
+                            ),
+                        )
+                    )
+
+        elif selector is SelectorKind.ADAPTER:
+            result = load(
+                "Carregando adaptadores",
+                lambda: self.network.adapters(self.host),
+            )
+            if isinstance(result, CommandResult) and result.success:
+                for item in self._list_payload(result):
+                    name = item.get("Name")
+                    if name:
+                        options.append(
+                            (
+                                str(name),
+                                (
+                                    f"{name} | {item.get('Status')} | "
+                                    f"{item.get('LinkSpeed') or '-'}"
+                                ),
+                            )
+                        )
+
+        elif selector is SelectorKind.PRINTER:
+            result = load(
+                "Carregando impressoras",
+                lambda: self.printers.list(self.host),
+            )
+            if isinstance(result, CommandResult) and result.success:
+                for item in self._list_payload(result):
+                    name = item.get("Name")
+                    if name:
+                        options.append(
+                            (
+                                str(name),
+                                (
+                                    f"{name} | "
+                                    f"{item.get('PrinterStatus') or '-'} | "
+                                    f"{item.get('DriverName') or '-'}"
+                                ),
+                            )
+                        )
+
+        elif selector is SelectorKind.PROFILE:
+            result = load(
+                "Carregando perfis",
+                lambda: self.users.profiles(self.host),
+            )
+            if isinstance(result, CommandResult) and result.success:
+                for item in self._list_payload(result):
+                    sid = item.get("SID")
+                    if sid:
+                        options.append(
+                            (
+                                str(sid),
+                                (
+                                    f"{item.get('LocalPath') or sid} | "
+                                    f"{sid} | Loaded={item.get('Loaded')}"
+                                ),
+                            )
+                        )
+
+        elif selector is SelectorKind.DEVICE:
+            result = load(
+                "Carregando dispositivos PnP",
+                lambda: self.devices.present_devices(self.host),
+            )
+            if isinstance(result, CommandResult) and result.success:
+                for item in self._list_payload(result):
+                    instance_id = item.get("InstanceId")
+                    if instance_id:
+                        options.append(
+                            (
+                                str(instance_id),
+                                (
+                                    f"{item.get('FriendlyName') or instance_id} | "
+                                    f"{item.get('Class') or '-'} | "
+                                    f"{item.get('Status') or '-'}"
+                                ),
+                            )
+                        )
+
+        elif selector is SelectorKind.SESSION:
+            result = load(
+                "Carregando sessões",
+                lambda: self.system.sessions(self.host),
+            )
+            if isinstance(result, CommandResult) and result.success:
+                for line in result.stdout.splitlines()[1:]:
+                    values = re.findall(r"\b\d+\b", line)
+                    if not values:
+                        continue
+                    session_id = int(values[0])
+                    options.append(
+                        (
+                            session_id,
+                            re.sub(r"\s+", " ", line.strip()),
+                        )
+                    )
+
+        return options[:150]
+
+    def _prompt_execution_parameters(self, bound) -> dict[str, Any]:
+        raw: dict[str, Any] = {}
+        for parameter in bound.spec.parameters:
+            if parameter.help_text:
+                print(f"  ℹ {parameter.help_text}")
+
+            default_text = (
+                f" [padrão: {parameter.default}]"
+                if parameter.default is not None
+                else ""
+            )
+
+            if parameter.selector is not None:
+                options = self._selector_options(
+                    parameter.selector,
+                    parameter.key,
+                )
+                if options:
+                    print(f"\n{parameter.label}:")
+                    for index, (_, label) in enumerate(options, 1):
+                        print(f"  {index:3} - {label}")
+                    print("  M - Informar manualmente")
+                    if not parameter.required:
+                        print("  0 - Nenhum / todos quando aplicável")
+
+                    selected = input("Escolha: ").strip()
+                    if (
+                        not parameter.required
+                        and selected == "0"
+                    ):
+                        raw[parameter.key] = None
+                        continue
+                    if (
+                        selected.isdigit()
+                        and 1 <= int(selected) <= len(options)
+                    ):
+                        raw[parameter.key] = options[
+                            int(selected) - 1
+                        ][0]
+                        continue
+                    if selected.casefold() != "m":
+                        raw[parameter.key] = selected
+                        continue
+
+            if parameter.kind is ParameterKind.CHOICE:
+                print(f"\n{parameter.label}:")
+                for index, option in enumerate(parameter.choices, 1):
+                    print(f"  {index} - {option}")
+                choice = input(
+                    f"Escolha{default_text}: "
+                ).strip()
+                if not choice and parameter.default is not None:
+                    raw[parameter.key] = parameter.default
+                    continue
+                if (
+                    choice.isdigit()
+                    and 1 <= int(choice) <= len(parameter.choices)
+                ):
+                    raw[parameter.key] = parameter.choices[
+                        int(choice) - 1
+                    ]
+                else:
+                    raw[parameter.key] = choice
+                continue
+
+            suffix = "" if parameter.required else " [opcional]"
+            value = input(
+                f"{parameter.label}{suffix}{default_text}: "
+            )
+            raw[parameter.key] = value
+
+        return raw
+
+    def _show_execution_plan(self, plan) -> None:
+        print("\nPRECONDITIONS / CAPABILITIES")
+        symbols = {
+            PolicyState.PASS: "✓",
+            PolicyState.FAIL: "✗",
+            PolicyState.WARN: "⚠",
+        }
+        for item in plan.policy.checks:
+            print(
+                f" {symbols[item.state]} "
+                f"[{item.state.value}] {item.message}"
+            )
+        print(
+            "\nPlano: "
+            f"{'LIBERADO' if plan.allowed else 'BLOQUEADO'}"
+        )
+
+    def _confirm_execution(self, bound) -> bool:
+        spec = bound.spec
+        strong = (
+            spec.risk in {RiskLevel.HIGH, RiskLevel.CRITICAL}
+            or spec.destructive
+            or spec.may_break_connectivity
+        )
+
+        if not spec.requires_confirmation:
+            return True
+
+        if not strong:
+            return self.confirm(
+                f"Executar {spec.title} em {self.host}?"
+            )
+
+        expected = f"EXECUTAR {self.host}"
+        print("\n⚠ CONFIRMAÇÃO REFORÇADA")
+        print(
+            f"Risco: {spec.risk.value} | "
+            f"Destrutiva: {'SIM' if spec.destructive else 'NÃO'} | "
+            f"Desconexão: {spec.disconnect_mode.value}"
+        )
+        print(f"Impacto: {spec.impact}")
+        typed = input(
+            f"Digite exatamente '{expected}' para confirmar: "
+        ).strip()
+        return typed.casefold() == expected.casefold()
+
+    def _show_execution_action(self, bound) -> None:
+        spec = bound.spec
+        flags: list[str] = []
+        if spec.destructive:
+            flags.append("DESTRUTIVA")
+        if spec.requires_reboot:
+            flags.append("REBOOT")
+        if spec.may_break_connectivity:
+            flags.append("REDE")
+        if spec.rollback_strategy:
+            flags.append("ROLLBACK")
+        flag_text = f" | {', '.join(flags)}" if flags else ""
+
+        print(f"\n=== {spec.title} ===")
+        print(
+            f"Categoria: {spec.category_label} | "
+            f"Risco: {spec.risk.value} | "
+            f"Classe: {spec.operation_class.value}{flag_text}"
+        )
+        print(f"Descrição: {spec.description}")
+        print(f"Impacto: {spec.impact}")
+        print(f"Timeout: {spec.timeout_seconds}s")
+        print(
+            f"Transportes: {', '.join(spec.allowed_transports)} | "
+            f"Idempotente: {'SIM' if spec.idempotent else 'NÃO'} | "
+            f"Retry: {spec.retry_policy.value}"
+        )
+        if spec.required_capabilities:
+            print(
+                "Capabilities: "
+                + ", ".join(spec.required_capabilities)
+            )
+        if spec.rollback_strategy:
+            print(f"Rollback: {spec.rollback_strategy}")
+        if spec.recommendation:
+            print(f"Recomendação: {spec.recommendation}")
+
+    def _choose_execution_action(
+        self,
+        actions,
+        *,
+        title: str,
+    ):
+        if not actions:
+            print("Nenhuma ação encontrada.")
+            self.pause()
+            return None
+
+        self.clear()
+        print(title)
+        print(f"Alvo: {self.host}\n")
+        for index, bound in enumerate(actions, 1):
+            spec = bound.spec
+            flags = []
+            if spec.destructive:
+                flags.append("D")
+            if spec.requires_reboot:
+                flags.append("R")
+            if spec.may_break_connectivity:
+                flags.append("C")
+            if spec.rollback_strategy:
+                flags.append("U")
+            suffix = f" [{' '.join(flags)}]" if flags else ""
+            print(
+                f"{index:2} - [{spec.risk.value:<8}] "
+                f"{spec.title}{suffix}"
+            )
+
+        print(
+            "\nD=destrutiva | R=reboot | C=conectividade | "
+            "U=rollback disponível"
+        )
+        print("0 - Voltar")
+        option = input("Ação: ").strip()
+        if (
+            option == "0"
+            or not option.isdigit()
+            or not 1 <= int(option) <= len(actions)
+        ):
+            return None
+        return actions[int(option) - 1]
+
+    def _rollback_last_execution(self) -> None:
+        record = self.context.execution
+        if (
+            record is None
+            or not record.rollback_available
+            or record.rollback_result is not None
+        ):
+            print("Não há execução reversível pendente neste atendimento.")
+            self.pause()
+            return
+
+        expected = f"DESFAZER {self.host}"
+        print(f"\nRollback: {record.action.title}")
+        print(f"Estratégia: {record.action.rollback_strategy}")
+        typed = input(
+            f"Digite exatamente '{expected}' para confirmar: "
+        ).strip()
+        if typed.casefold() != expected.casefold():
+            print("Rollback cancelado.")
+            self.pause()
+            return
+
+        try:
+            rollback = self.jobs.run(
+                f"Rollback: {record.action.title}",
+                self._trace(
+                    lambda: self.execution_engine.rollback(
+                        record,
+                        context=self._execution_policy_context(),
+                        operator=getpass.getuser(),
+                    ),
+                    action=f"execution.rollback.{record.action.key}",
+                ),
+                operation_class=record.action.operation_class,
+                timeout=record.action.timeout_seconds,
+                host=self.host,
+                correlation_id=self.context.correlation_id,
+            )
+        except Exception as exc:
+            print(
+                f"✗ Rollback falhou: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            self.pause()
+            return
+
+        self.show_result(rollback.result)
+        print(
+            f"\nVALIDAÇÃO DO ROLLBACK: "
+            f"{rollback.validation.status.value} — "
+            f"{rollback.validation.message}"
+        )
+
+        if self.db and record.execution_id is not None:
+            self.db.save_rollback_record(
+                rollback,
+                original_execution_id=record.execution_id,
+                operator=getpass.getuser(),
+                correlation_id=self.context.correlation_id,
+            )
+
+        if rollback.validation.status is ValidationStatus.PASS:
+            record.rollback_available = False
+
+        self.pause()
+
+    def _execute_bound_action(self, bound) -> None:
+        self._show_execution_action(bound)
+
+        try:
+            raw_parameters = self._prompt_execution_parameters(
+                bound
+            )
+            parsed = self.execution_engine.validate_parameters(
+                bound,
+                raw_parameters,
+            )
+            plan = self.execution_engine.plan(
+                self.host,
+                bound.spec.key,
+                parsed,
+                context=self._execution_policy_context(),
+            )
+        except (ValueError, ExecutionBlockedError) as exc:
+            print(f"\n✗ Plano inválido: {exc}")
+            self.pause()
+            return
+
+        if parsed:
+            print("\nParâmetros:")
+            sensitive = {
+                item.key
+                for item in bound.spec.parameters
+                if item.sensitive
+            }
+            for key, value in parsed.items():
+                visible = "***" if key in sensitive else value
+                print(f" - {key}: {visible}")
+
+        self._show_execution_plan(plan)
+        if not plan.allowed:
+            print(
+                "\nAção bloqueada antes da confirmação. "
+                "Corrija capabilities/preconditions e tente novamente."
+            )
+            self.pause()
+            return
+
+        if not self._confirm_execution(bound):
+            print("Execução cancelada.")
+            self.pause()
+            return
+
+        try:
+            record = self.jobs.run(
+                f"Execução: {bound.spec.title}",
+                self._trace(
+                    lambda: self.execution_engine.execute(
+                        self.host,
+                        bound.spec.key,
+                        parsed,
+                        context=self._execution_policy_context(),
+                        operator=getpass.getuser(),
+                        reconnect=self._recover_execution_host,
+                    ),
+                    action=f"execution.{bound.spec.key}",
+                ),
+                operation_class=bound.spec.operation_class,
+                timeout=bound.spec.timeout_seconds,
+                host=self.host,
+                correlation_id=self.context.correlation_id,
+            )
+        except Exception as exc:
+            print(
+                f"\n✗ Execução falhou: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            self.pause()
+            return
+
+        remediation = record.remediation
+        self.context.remediation = remediation
+        self.context.execution = record
+        self.show_result(remediation.command_result)
+
+        if record.recovery is not None:
+            print(
+                f"\nRECUPERAÇÃO: "
+                f"{'READY' if record.recovery.ready else 'NÃO RECUPERADO'} | "
+                f"tentativas={record.recovery.attempts} | "
+                f"{record.recovery.elapsed_seconds:.1f}s | "
+                f"{record.recovery.transport or '-'}"
+            )
+
+        print(
+            f"\nVALIDAÇÃO: "
+            f"{remediation.validation.status.value} — "
+            f"{remediation.validation.message}"
+        )
+
+        before = self._execution_evidence(remediation.before)
+        after = self._execution_evidence(remediation.after)
+        print("\nANTES:")
+        print(
+            json.dumps(
+                before,
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            )
+            if before is not None
+            else "-"
+        )
+        print("\nDEPOIS:")
+        print(
+            json.dumps(
+                after,
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            )
+            if after is not None
+            else "-"
+        )
+
+        if self.db:
+            self.db.save_execution_record(
+                record,
+                correlation_id=self.context.correlation_id,
+            )
+            if isinstance(after, dict):
+                self.db.save_snapshot(
+                    self.host,
+                    after,
+                    kind=f"execution:{bound.spec.key}",
+                    correlation_id=self.context.correlation_id,
+                )
+
+        if record.rollback_available:
+            print(
+                "\n↩ Rollback disponível. Volte à Central de "
+                "Execuções e escolha [U] para desfazer."
+            )
+
+        print(
+            f"\nCorrelation ID: "
+            f"{self.context.correlation_id}"
+        )
+        self.pause()
+
+    def open_execution_category(self, category: str) -> None:
+        self.menu_execution(category=category)
+
+    def menu_execution(self, category: str | None = None) -> None:
+        if not self.require_host():
+            return
+        if not self.context.session or not self.context.session.ready:
+            print(
+                "Nenhum transporte administrativo validado para a estação. "
+                "Execute o preflight/conectividade antes de usar a Central de Execuções."
+            )
+            self.pause()
+            return
+
+        validation = self.settings.get(
+            "_execution_catalog_validation",
+            {},
+        )
+
+        if category is None:
+            self.clear()
+            print("CENTRAL DE EXECUÇÕES")
+            print(
+                f"Alvo: {self.host} | "
+                f"Transporte: {self.context.session.transport} | "
+                f"Ações: {len(self.execution_registry)}"
+            )
+            counts = validation.get("enabled_counts", {})
+            if counts:
+                print(
+                    "Catálogos: "
+                    f"pacotes={counts.get('packages', 0)} | "
+                    f"certificados={counts.get('certificates', 0)} | "
+                    f"registro={counts.get('registry_actions', 0)}"
+                )
+            issues = validation.get("issues", [])
+            if issues:
+                print(
+                    f"⚠ {len(issues)} entrada(s) de catálogo "
+                    "foram desabilitadas no bootstrap."
+                )
+
+            categories = self.execution_registry.categories()
+            for index, (key, label) in enumerate(categories, 1):
+                count = len(
+                    self.execution_registry.by_category(key)
+                )
+                print(f"{index} - {label} ({count})")
+
+            print("B - Buscar ação")
+            if (
+                self.context.execution is not None
+                and self.context.execution.rollback_available
+                and self.context.execution.rollback_result is None
+            ):
+                print("U - Desfazer última execução reversível")
+            print("0 - Voltar")
+
+            option = input("Categoria/Ação: ").strip()
+            if option.casefold() == "b":
+                query = input("Buscar: ").strip()
+                bound = self._choose_execution_action(
+                    self.execution_registry.search(query),
+                    title=f"BUSCA — {query or 'todas as ações'}",
+                )
+                if bound:
+                    self._execute_bound_action(bound)
+                return
+
+            if option.casefold() == "u":
+                self._rollback_last_execution()
+                return
+
+            if (
+                option == "0"
+                or not option.isdigit()
+                or not 1 <= int(option) <= len(categories)
+            ):
+                return
+            category = categories[int(option) - 1][0]
+
+        actions = self.execution_registry.by_category(category)
+        label = (
+            actions[0].spec.category_label
+            if actions
+            else category
+        )
+        bound = self._choose_execution_action(
+            actions,
+            title=f"EXECUÇÕES — {label}",
+        )
+        if bound:
+            self._execute_bound_action(bound)
 
     def menu_baseline(self) -> None:
         self.clear()

@@ -1,146 +1,127 @@
-# Central N2 Workstation 5.1.0 — arquitetura consolidada
+# Central N2 Workstation 5.2.0 — arquitetura consolidada
 
-A 5.1 transforma a evolução histórica do autoPsexec em uma plataforma de suporte N2 com contrato explícito de transporte, estado, segurança de mutação, diagnóstico, validação e rastreabilidade.
+A 5.2 transforma a Central de uma plataforma predominantemente diagnóstica em uma plataforma operacional completa, mantendo o princípio de execução controlada.
 
-## Fluxo
+## Fluxo consolidado
 
-\`\`\`text
+```text
 Alvo
  ↓
 HostIdentity
  ↓
 ConnectivityDiagnostics
  ↓
-TransportManager
- ↓
 Local / WinRM / PsExec
  ↓
-AttendanceContext + SessionManager
+SessionManager + Capabilities
  ↓
-JobManager
+AttendanceContext
  ↓
-Snapshot / Coleta
+Diagnóstico / Playbook
  ↓
-Evaluation + Finding
+ExecutionRegistry
  ↓
-Correlation / Diagnosis
+ExecutionPolicy
  ↓
-Playbook
+Plano
  ↓
-Remediation
+Confirmação
  ↓
-Validação
+ExecutionEngine
  ↓
-SQLite / Relatório / GLPI
-\`\`\`
+Módulo de domínio
+ ↓
+Recovery opcional
+ ↓
+Postcheck
+ ↓
+PASS / FAIL / UNKNOWN
+ ↓
+SQLite v4
+ ↓
+Rollback quando suportado
+```
 
-## O que diferencia a 5.1
+## O que diferencia a 5.2
 
-### WinRM realmente validado
+### Catálogo modular
 
-\`Test-WSMan\` sozinho não basta. O preflight exige execução de \`Invoke-Command\`.
+Ações não ficam em um arquivo gigante. Cada domínio possui catálogo próprio e `catalog.py` apenas os compõe.
 
-### PsExec como transporte suportado
+### Ação como contrato
 
-5985 bloqueada não encerra o atendimento se 445, ADMIN$ e PsExec estiverem válidos.
+A ação conhece risco, timeout, transportes, privilege, capabilities, retry, idempotência, disconnect e rollback.
 
-### Mutação sem dupla execução
+### Policy antes da confirmação
 
-Leituras podem repetir por fallback. Mutações só repetem quando a falha é comprovadamente anterior à execução.
+A Central não pergunta “tem certeza?” para uma ação que já sabe ser incompatível. Ela bloqueia primeiro.
 
-Se a entrega for incerta:
+### Seleção orientada a objetos
 
-\`\`\`text
-INDETERMINADO → validar estado → decidir
-\`\`\`
+Processos, serviços, adaptadores, impressoras, perfis, PnP e sessões podem ser escolhidos a partir de inventário do próprio host.
 
-### Estado único
+### Busca
 
-Dados do atendimento ficam em \`AttendanceContext\`, eliminando mirrors paralelos de sessão/diagnóstico/remediação/relatório.
+Ações podem ser localizadas por texto e tags no menu 28.
 
-### Scheduler único
+### Expected disconnect
 
-\`JobManager\` controla concorrência, heartbeat e serialização por host.
+Restart de NIC, DHCP e reboot não são tratados como falha genérica. O workflow sabe que a conexão pode cair.
 
-### Avaliação explícita
+### Rollback honesto
 
-PASS, FAIL, UNKNOWN e N/A têm significados distintos.
+Há rollback somente onde o estado anterior é conhecido e restaurável.
 
-### Remediação validada
+### Allowlist corporativa
 
-Ação concluída não é sinônimo de problema resolvido. Remediações possuem probes e validadores específicos.
+Pacotes, certificados e Registro são tipados e validados no bootstrap.
 
-### Persistência evolutiva
+### Auditoria rica
 
-SQLite usa migrations e \`PRAGMA user_version\`, com schema atual 2.
+SQLite v4 registra execution records e rollback linkage com parâmetros redigidos.
 
-### Distribuição endurecida
+## Estados
 
-- SemVer;
-- download temporário;
-- validação de tamanho;
-- SHA-256 quando publicado;
-- rename atômico;
-- UPX desativado;
-- hashes de release;
-- assinatura opcional;
-- CI fixado e reprodutível.
+### Transporte
 
-## Playbooks
+READY_LOCAL, READY_WINRM, READY_PSEXEC e estados de falha explícitos.
 
-- lentidão;
-- rede;
-- impressão;
-- domínio/GPO;
-- Windows Update;
-- crash;
-- BSOD;
-- disco cheio;
-- GLPI Agent.
+### Validação
 
-Playbook é coleta orientada, não automação de remediação.
+PASS, FAIL, UNKNOWN.
 
-## Remediações guiadas
+### Policy
 
-- limpeza segura;
-- reinício de Spooler;
-- reset de Windows Update;
-- GPUpdate /force.
+PASS, FAIL, WARN.
 
-Estados de validação: PASS, FAIL, UNKNOWN.
+### Disconnect
 
-## Baselines
+NONE, TEMPORARY, TERMINAL.
 
-- DEFAULT;
-- DESKTOP;
-- NOTEBOOK;
-- TI.
+### Retry
 
-Controles opcionais não exigidos aparecem como N/A.
+NEVER, PRE_EXECUTION_ONLY, SAFE_TRANSIENT.
 
-## Interfaces
+## Compatibilidade
 
-Console é a interface operacional principal.
+Scripts históricos continuam no repositório, mas não definem a arquitetura atual.
 
-A GUI Tkinter usa o modelo compartilhado de jobs para não manter um scheduler paralelo de execução.
+`ConsoleUIV5` herda `ConsoleBase`.
 
-## Compatibilidade histórica
+## Definition of Done 5.2
 
-Arquivos antigos permanecem no repositório para referência, mas não definem a arquitetura da 5.1.
-
-\`ConsoleUIV5\` herda \`ConsoleBase\`, não \`ConsoleUIV3\`.
-
-## Definition of Done 5.1
-
-Uma mudança está pronta quando:
-
-\`\`\`text
-contrato correto
-+ segurança de execução
-+ resultado observável
-+ teste
-+ lint/type/coverage
-+ build
+```text
+ação modular
++ contrato completo
++ policy
++ capability/precondition
++ mutação segura
++ recovery quando necessário
++ postcheck
++ rollback quando real
++ auditoria
++ testes de falha
++ Ruff/mypy/coverage
++ build/installer
 + documentação
-+ revisão de segredo
-\`\`\`
+```

@@ -1,239 +1,267 @@
-# Arquitetura — Central N2 Workstation 5.1.0
+# Arquitetura — Central N2 Workstation 5.2.0
 
-## Visão
+## Visão geral
 
-\`\`\`text
+```text
 main.py
   ↓
-ConfigLoader + AuditLogger
+ConfigLoader
   ↓
-RemoteExecutor
+validate_execution_configuration
   ↓
-ConsoleUIV5 / GUI
+AuditLogger + RemoteExecutor
   ↓
-JobManager + AttendanceContext + SessionManager
+ConsoleUIV5
   ↓
-Módulos / Playbooks / RemediationEngine
+AttendanceContext + SessionManager + JobManager
   ↓
-LocalTransport | WinRMTransport | PsExecTransport
+Diagnóstico / Playbooks / Central de Execuções
+  ↓
+ExecutionRegistry → ExecutionPolicy → ExecutionEngine
+  ↓
+Módulos de domínio
+  ↓
+Local | WinRM | PsExec
   ↓
 Estação Windows
   ↓
-SQLite / relatório / GLPI
-\`\`\`
+Postcheck / Recovery / Rollback
+  ↓
+SQLite v4 / Relatórios / GLPI
+```
 
-A regra de dependência é descendente: UI orquestra, módulos encapsulam domínio, executor decide transporte e transportes não conhecem a UI.
+## Estado único do atendimento
 
-## Bootstrap
+`AttendanceContext` mantém:
 
-\`main.py\`:
-
-1. processa argumentos;
-2. valida Windows;
-3. solicita UAC quando necessário;
-4. carrega \`settings.json\` e \`settings.local.json\` uma única vez;
-5. cria \`AuditLogger\`;
-6. cria \`RemoteExecutor\`;
-7. injeta a mesma configuração na interface selecionada.
-
-A configuração efetiva não é relida independentemente pelos componentes principais.
-
-## Estado do atendimento
-
-\`AttendanceContext\` é a fonte única de verdade para:
-
-- host lógico do atendimento;
-- \`correlation_id\`;
+- host;
+- correlation_id;
 - sessão;
-- snapshot de saúde;
-- diagnósticos;
+- health snapshot;
+- diagnoses;
 - playbook;
-- remediação;
-- caminho do relatório.
+- remediation;
+- última execution;
+- report path.
 
-Ao selecionar outro host, um novo contexto é criado; dados do atendimento anterior não são reutilizados.
+Trocar de host cria novo contexto e invalida evidência anterior.
 
 ## Sessão lógica
 
-\`SessionManager\` não mantém uma \`PSSession\` permanente. Ele guarda:
+`SessionManager` não mantém PSSession permanente. Ele guarda:
 
 - transporte selecionado;
-- diagnóstico de conectividade;
+- conectividade;
 - capabilities;
-- estado de prontidão.
+- capability error;
+- readiness.
 
 ## Preflight
 
-A conectividade é avaliada em camadas:
-
-\`\`\`text
+```text
 DNS
  ↓
-ping + TCP 445 + TCP 5985 + TCP 5986
+ping + 445 + 5985 + 5986
  ↓
 WinRM autenticado / ADMIN$
  ↓
 PsExec real
  ↓
-estado final + transporte
-\`\`\`
+CapabilityDetector
+ ↓
+WorkstationSession
+```
 
-Estados:
+WinRM só fica READY após `Invoke-Command` autenticado.
 
-| Estado | Significado |
-| --- | --- |
-| READY_LOCAL | alvo é a própria estação |
-| READY_WINRM | WinRM autenticado e com Invoke-Command validado |
-| READY_PSEXEC | WinRM indisponível e PsExec/ADMIN$ validados |
-| DNS_FAILED | nome não pôde ser resolvido |
-| AUTHENTICATION_FAILED | rede responde, mas autenticação/autorização falhou |
-| NETWORK_UNREACHABLE | nenhum caminho administrativo conhecido respondeu |
-| NO_USABLE_TRANSPORT | host alcançável, porém sem transporte validado |
+## RemoteExecutor e fallback
 
-### WinRM
+Consultas podem repetir por fallback.
 
-O teste não se limita a \`Test-WSMan\`. A Central também executa um \`Invoke-Command\` mínimo e verifica um marcador conhecido. Assim, listener disponível não é confundido com sessão autenticada utilizável.
+Mutações usam APIs específicas:
 
-### PsExec
+- `execute_mutating_powershell`;
+- `execute_mutating_powershell_json`;
+- `execute_mutating_cmd`.
 
-É fallback de primeira classe, não “último hack”. O teste executa comando remoto real. Dependências típicas: TCP 445, ADMIN$, privilégio administrativo e binário homologado.
+Falha pré-execução comprovada pode cair para PsExec. Se a ação pode ter sido entregue, `CommandResult.indeterminate=True` e o fallback cego é suprimido.
 
-## Semântica de fallback
+## Central de Execuções
 
-O executor classifica a falha WinRM antes de decidir fallback.
+### Composition root
 
-### Consulta
+`execution/catalog.py` apenas compõe os catálogos.
 
-\`\`\`text
-READ_ONLY + falha de transporte
-  → pode repetir via PsExec
-\`\`\`
+Domínios ficam em `execution/catalogs/`:
 
-### Mutação
+- processes;
+- services;
+- software;
+- network;
+- printers;
+- devices;
+- windows;
+- updates;
+- domain;
+- users;
+- disk;
+- glpi;
+- security;
+- energy;
+- packages;
+- certificates;
+- registry;
+- files.
 
-\`\`\`text
-falha pré-execução comprovada
-  → pode repetir via PsExec
+### ExecutionAction
 
-falha durante/depois de possível execução
-  → indeterminate=True
-  → fallback_suppressed=True
-  → operador valida estado antes de repetir
-\`\`\`
+Contrato operacional:
 
-A regra vale para PowerShell e CMD mutáveis.
+- key estável;
+- categoria e descrição;
+- OperationClass;
+- RiskLevel;
+- timeout;
+- confirmação;
+- destructive/reboot/conectividade;
+- parâmetros tipados;
+- action_version;
+- idempotent;
+- RetryPolicy;
+- allowed_transports;
+- required_capabilities;
+- required_privilege;
+- DisconnectMode;
+- recovery timeout/delay;
+- rollback_strategy;
+- tags.
 
-## CommandResult
+### Policy
 
-Contrato central:
+`ExecutionPolicy` avalia antes da confirmação:
 
-- \`success\`;
-- \`command\`;
-- \`host\`;
-- \`stdout\`;
-- \`stderr\`;
-- \`return_code\`;
-- \`duration_ms\`;
-- \`transport\`;
-- \`data\`;
-- \`metadata\`.
+```text
+session.ready
++ transport permitido
++ capabilities
++ privilege
++ custom preconditions
+= LIBERADO | BLOQUEADO
+```
 
-\`indeterminate\` é derivado de metadata e significa: a ação pode ter atingido o destino, mas a Central não conseguiu confirmar o resultado final.
+Nenhuma ação bloqueada chega ao handler.
 
-## Scheduler
+### RetryPolicy
 
-Há um \`JobManager\` compartilhado.
+- `NEVER`;
+- `PRE_EXECUTION_ONLY`;
+- `SAFE_TRANSIENT`.
+
+Padrão: `PRE_EXECUTION_ONLY`.
+
+O ExecutionEngine não executa retry automático cego. O executor continua sendo responsável por fallback seguro. `SAFE_TRANSIENT` é aceito apenas para ação idempotente.
+
+### DisconnectMode
+
+- `NONE`: fluxo normal;
+- `TEMPORARY`: queda esperada, aguarda recovery e reabre sessão;
+- `TERMINAL`: perda de conexão é consequência final esperada, como shutdown.
+
+Em TEMPORARY, um comando indeterminado só pode terminar em PASS se a estação voltar e o postcheck comprovar o objetivo.
+
+### Rollback
+
+`BoundExecutionAction` pode possuir `rollback_handler` e `rollback_validator`.
+
+Rollback recebe:
+
+- parâmetros originais;
+- evidência before;
+- host.
+
+O rollback é uma nova execução auditada ligada à execução original.
+
+## Seletores
+
+`SelectorKind` suporta:
+
+- PROCESS;
+- SERVICE;
+- ADAPTER;
+- PRINTER;
+- PROFILE;
+- DEVICE;
+- SESSION.
+
+A UI consulta o módulo correspondente e oferece seleção amigável.
+
+## JobManager
 
 Classes:
 
-- \`READ_ONLY\`;
-- \`HEAVY_READ\`;
-- \`LIGHT_WRITE\`;
-- \`HEAVY_WRITE\`;
-- \`DISRUPTIVE\`.
+- READ_ONLY;
+- HEAVY_READ;
+- LIGHT_WRITE;
+- HEAVY_WRITE;
+- DISRUPTIVE.
 
-Operações que não são \`READ_ONLY\` são serializadas por host. Estados de job:
+Operações não READ_ONLY são serializadas por host.
 
-\`QUEUED → RUNNING → SUCCESS | FAILED | TIMEOUT | CANCELLED\`.
+## Validação
 
-Timeout local não prova encerramento remoto. Um job marcado TIMEOUT não volta para SUCCESS se o worker terminar depois.
+Fluxo:
 
-## Avaliação
-
-\`core/evaluation.py\` centraliza os estados:
-
-- \`PASS\`;
-- \`FAIL\`;
-- \`UNKNOWN\`;
-- \`NOT_APPLICABLE\`.
-
-UNKNOWN representa ausência de evidência. N/A representa controle não exigido. Apenas PASS/FAIL entram no denominador do compliance.
-
-## Diagnóstico e playbooks
-
-\`DiagnosticEngine\` produz fatos (\`Finding\`). \`CorrelationEngine\` produz diagnósticos (\`Diagnosis\`) com rationale e confiança.
-
-Playbooks executam coletores orientados por sintoma; não são remediações automáticas.
-
-## Remediação
-
-\`RemediationEngine\` separa:
-
-\`\`\`text
+```text
 before probe
   ↓
-ação
+handler
+  ↓
+recovery opcional
   ↓
 after probe
   ↓
-validador específico
+validator
   ↓
-PASS / FAIL / UNKNOWN
-\`\`\`
+PASS | FAIL | UNKNOWN
+```
 
-Se a execução for indeterminada, o validador deve preferir UNKNOWN quando não houver evidência suficiente.
+UNKNOWN significa que o estado final não pôde ser comprovado.
 
 ## Persistência
 
-SQLite:
+SQLite schema **4**.
 
-- WAL;
-- \`PRAGMA foreign_keys=ON\`;
-- \`busy_timeout\`;
-- migrations sequenciais;
-- \`PRAGMA user_version\`;
-- \`quick_check\` na inicialização;
-- retenção configurável.
+Tabelas principais:
 
-Schema atual: **2**.
+- hosts;
+- snapshots;
+- jobs;
+- findings;
+- remediations;
+- executions;
+- reports.
 
-Tabelas operacionais: \`hosts\`, \`snapshots\`, \`jobs\`, \`findings\`, \`remediations\`, \`reports\`.
+`executions` registra operador, action_version, transporte, timestamps, duration, risco, parâmetros redigidos, validation state, correlation_id, rollback_of e is_rollback.
 
 ## Auditoria
 
-\`AuditLogger\` é thread-safe. Por padrão grava metadados compactos; payloads verbosos são opt-in. Redaction cobre senha, token, API key, Authorization, Bearer e credenciais.
+`ExecutionRecord.audit_payload()` persiste apenas representação sanitizada:
+
+- parâmetros sensíveis redigidos;
+- policy checks;
+- transporte e return code;
+- before/after redigidos;
+- validation;
+- recovery;
+- rollback availability.
+
+O comando bruto não é necessário para a auditoria padrão.
 
 ## Distribuição
 
 - PyInstaller onedir;
-- UPX desativado;
 - metadata de versão Windows;
 - Inno Setup;
-- release com SHA256SUMS;
-- assinatura Authenticode opcional quando o CI recebe certificado.
-
-## Regra de evolução
-
-Nova funcionalidade deve respeitar:
-
-\`\`\`text
-entrada validada
-+ ActionSpec
-+ operação classificada
-+ timeout
-+ CommandResult
-+ resultado estruturado quando possível
-+ logging seguro
-+ teste
-+ documentação
-\`\`\`
+- SHA256SUMS;
+- Authenticode opcional;
+- CI em Python 3.10/3.12/3.13.

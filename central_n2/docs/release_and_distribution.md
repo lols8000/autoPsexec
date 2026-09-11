@@ -1,4 +1,4 @@
-# Release e distribuição — Central N2 Workstation 5.1.0
+# Release e distribuição — Central N2 Workstation 5.2.0
 
 ## Fontes de versão
 
@@ -40,8 +40,8 @@ Windows com Python:
 
 - compile com SyntaxWarning tratado como erro;
 - Ruff para erros de correção/import;
-- mypy nos contratos endurecidos;
-- pytest com coverage e piso mínimo.
+- mypy nos contratos endurecidos, incluindo `execution/`;
+- pytest com coverage e piso mínimo, incluindo o Execution Center.
 
 ### Build
 

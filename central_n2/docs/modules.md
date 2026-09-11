@@ -1,220 +1,213 @@
-# Catálogo de módulos — Central N2 Workstation 5.1.0
+# Catálogo de módulos — Central N2 Workstation 5.2.0
 
 ## Convenções
 
-- **READ_ONLY**: consulta leve;
-- **HEAVY_READ**: consulta custosa;
-- **LIGHT_WRITE**: alteração de baixo impacto;
-- **HEAVY_WRITE**: alteração pesada;
-- **DISRUPTIVE**: pode afetar sessão/rede/energia.
+OperationClass:
 
-Operações não READ_ONLY são serializadas por host pelo JobManager.
+- READ_ONLY;
+- HEAVY_READ;
+- LIGHT_WRITE;
+- HEAVY_WRITE;
+- DISRUPTIVE.
 
-## Saúde / Compliance
+Mutações são serializadas por host.
 
-\`health.py\` coleta host, usuário, Windows/build, hardware, CPU, RAM, disco, uptime, reboot pendente, serviços automáticos, Defender, Firewall, GLPI, BitLocker, TPM e Secure Boot.
+## Módulos de diagnóstico
 
-\`compliance.py\` usa o motor comum de avaliação.
+### health.py
 
-Estados: PASS, FAIL, UNKNOWN e NOT_APPLICABLE.
+Snapshot de host, Windows, hardware, CPU, RAM, disco, uptime, reboot pending, serviços, Defender, Firewall, GLPI, BitLocker, TPM e Secure Boot.
 
-## Performance
+### performance.py
 
-\`performance.py\` amostra CPU, RAM, disco e rede e identifica processos dominantes.
+CPU/RAM/disco/rede e processos dominantes.
 
-## Reparo Windows
+### crashes.py
 
-\`repair.py\` expõe SFC, DISM, Component Store, CHKDSK e WMI.
+BugCheck, minidumps, MEMORY.DMP, Application Error/WER.
 
-Operações pesadas usam classes de job compatíveis com serialização por host.
+### storage.py
 
-## Dispositivos / Drivers
+PhysicalDisk e bateria.
 
-\`devices.py\`:
+### startup.py / tasks.py
 
-- PnP com erro;
-- inventário de drivers;
-- USB;
-- rescan;
-- exportação.
+Startup, chaves Run, serviços automáticos e Scheduled Tasks.
 
-Inventário de drivers normaliza datas, agrupa registros equivalentes e mostra assinatura/INF/contagem.
+## Módulos de execução
 
-## Inicialização / Tarefas
+### system.py
 
-\`startup.py\`: startup commands, chaves Run e serviços automáticos parados.
+- sessões;
+- processos;
+- status/ações de serviço;
+- StartType;
+- GPUpdate;
+- mensagem;
+- logoff;
+- restart/shutdown/abort.
 
-\`tasks.py\`: tarefas agendadas, estado, última/próxima execução e falhas.
-
-## Crashes / BSOD
-
-\`crashes.py\`: BugCheck, Minidump, MEMORY.DMP e Application Error/WER.
-
-## Segurança
-
-\`security.py\`: Defender, Firewall, BitLocker, TPM, Secure Boot, RDP, SMBv1, UAC e ameaças.
-
-A Central não fornece ação genérica para desligar controles de segurança.
-
-## Rede
-
-\`network.py\`:
+### network.py
 
 - adaptadores;
 - IP/gateway/DNS;
 - DHCP;
+- flush/register DNS;
+- Winsock/TCP-IP;
 - ARP;
-- conexões;
-- flush DNS;
-- renovação DHCP;
-- resets existentes.
+- enable/disable/restart de adaptador.
 
-Mutações de rede usam o caminho seguro de execução mutável.
+Restart de NIC usa workflow de disconnect temporário na Central de Execuções.
 
-## Usuários / Perfis
-
-\`users_profiles.py\` consulta administradores locais, perfis, SID, último uso e tamanho.
-
-Ações destrutivas devem exigir validação/confirmar alvo e nunca ser generalizadas em lote sem controle.
-
-## Software / Winget
-
-\`software.py\`:
-
-- inventário por registro;
-- disponibilidade do Winget;
-- install/upgrade/uninstall pelo catálogo permitido.
-
-Operações Winget verificam \`$LASTEXITCODE\`.
-
-## GLPI Agent
-
-\`glpi.py\`:
-
-- status;
-- cópia de instalador homologado;
-- instalação/reparo;
-- reinício de serviço;
-- inventário forçado;
-- log recente.
-
-## GLPI API
-
-\`integrations/glpi/client.py\` encapsula sessão, erros HTTP/rede, JSON e follow-up de ticket.
-
-## Impressoras
-
-\`printers.py\`:
+### printers.py
 
 - inventário;
 - fila;
-- status do Spooler;
-- reinício;
-- limpeza de fila.
+- Spooler;
+- limpar fila;
+- adicionar conexão;
+- remover impressora.
 
-A remediação guiada de Spooler valida estado Running depois da ação.
+### devices.py
 
-## Domínio / GPO
+- PnP com erro;
+- PnP presente;
+- drivers;
+- USB;
+- enable/disable device;
+- rescan;
+- install/remove driver package;
+- export.
 
-\`domain.py\`:
+### users_profiles.py
 
-- status de domínio;
-- DC;
+- admins locais;
+- profiles;
+- profile status;
+- limpeza de TEMP por SID;
+- remoção controlada de perfil.
+
+### software.py
+
+- inventário;
+- Winget;
+- install/upgrade/uninstall pelo catálogo.
+
+### glpi.py
+
+- status;
+- instalação/reparo;
+- restart;
+- force inventory;
+- logs.
+
+### security.py
+
+- posture;
+- threats;
+- Defender status;
+- signature update;
+- quick/full scan.
+
+### domain.py
+
+- domínio/DC;
 - secure channel;
-- horário;
-- gpresult;
-- gpupdate;
-- repair de secure channel.
+- gpresult/gpupdate;
+- w32time;
+- resync;
+- purge Kerberos SYSTEM.
 
-## Disco
+### updates.py
 
-\`disk.py\`:
-
-- uso do C:;
-- perfis por tamanho;
-- estimativa de limpeza;
-- limpeza segura.
-
-A limpeza segura atua em \`%TEMP%\` e \`%SystemRoot%\Temp\`; **não toca Lixeira, Downloads ou cache do Windows Update**.
-
-## Armazenamento / Bateria
-
-\`storage.py\` consulta Get-PhysicalDisk e WMI/CIM de bateria quando disponíveis.
-
-## Ferramentas avançadas
-
-\`workstation_tools.py\` consulta certificados, unidades mapeadas, shares, proxy, ativação e logons.
-
-## Sysinternals
-
-\`sysinternals.py\`: Autorunsc, ProcDump, Handle e Sigcheck.
-
-Não há download automático.
-
-## Sistema
-
-\`system.py\`:
-
-- sessões;
-- processos;
-- serviços;
-- GPUpdate;
-- mensagens;
-- restart/shutdown/abort.
-
-Ações de energia e mudança de serviço são classificadas como mutações/disruptivas.
-
-## Windows Update
-
-\`updates.py\`:
-
-- status/histórico;
-- pendências;
+- histórico/status;
 - scan;
-- reset transacional de componentes.
+- install pending;
+- reset transacional dos componentes.
 
-No reset, \`SoftwareDistribution\` e \`catroot2\` são renomeados com timestamp e serviços originalmente ativos são restaurados em bloco \`finally\`.
+### repair.py
 
-## Pacote diagnóstico
+- SFC;
+- DISM;
+- Component Store;
+- CHKDSK;
+- WMI;
+- Store reset.
 
-\`diagnostic_package.py\` agrega evidências para escalonamento.
+### disk.py
 
-Pacotes são dados operacionais; não versionar.
+- uso;
+- profiles por tamanho;
+- estimativa;
+- cleanup seguro.
 
-## Conectividade
+### packages.py
 
-\`core/connectivity.py\` avalia DNS, ping, 445, 5985, 5986, WinRM autenticado, ADMIN$ e PsExec real.
+Instala apenas pacote homologado em configuração.
 
-## Executor
+### certificates.py
 
-\`core/executor.py\` concentra semântica de transporte e fallback seguro.
+Importa apenas certificado público homologado.
 
-Use APIs mutáveis para qualquer ação que altere o host.
+### registry_actions.py
 
-## Jobs / Batch
+Executa e inspeciona apenas RegistryAction homologada; suporta rollback do valor anterior.
 
-\`core/jobs.py\` é o scheduler central.
+### file_ops.py
 
-\`modules/batch.py\` pode reutilizar esse mesmo scheduler, evitando pools paralelos independentes.
+- ensure directory;
+- path status;
+- move/rename;
+- remove file.
 
-## Diagnóstico / Correlação
+Não oferece delete recursivo genérico.
 
-\`diagnostics/\` separa Finding de Diagnosis.
+## Catálogos de execução
 
-## Playbooks
+`execution/catalogs/` separa definição operacional do módulo técnico.
 
-\`playbooks/\` coleta evidências orientadas por sintoma. Não aplica remediação silenciosa.
+Cada catálogo liga:
 
-## Remediação
+```text
+ExecutionAction
++ handler
++ before_probe
++ after_probe
++ validator
++ preconditions
++ rollback opcional
+```
 
-\`remediation/\` executa before/action/after/validator.
+## Core de execução
 
-Validadores atuais: limpeza, Spooler, Windows Update e GPUpdate.
+### execution/models.py
+
+Contratos de ação, parâmetro, risco, retry, disconnect, selector, plan, record e recovery.
+
+### execution/registry.py
+
+Registro, invariantes, categorias e busca.
+
+### execution/policy.py
+
+Transport, privilege, capabilities e preconditions.
+
+### execution/engine.py
+
+Plan, execute, recovery, validation e rollback.
+
+### execution/config_validation.py
+
+Sanitização das allowlists no bootstrap.
 
 ## Persistência
 
-\`storage/database.py\` usa migrations versionadas e persiste correlation_id.
+`storage/database.py` usa schema 4 e persiste executions/rollbacks com correlation_id.
 
 ## Relatórios
 
-\`reports/\` gera Markdown, JSON e TXT; nomes de arquivos são sanitizados.
+`reports/` gera Markdown/JSON/TXT.
+
+## Regra de módulo
+
+Módulo não conhece UI, não chama `input()` e retorna `CommandResult`.

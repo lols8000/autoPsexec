@@ -12,6 +12,7 @@ from core.config import ConfigError, ConfigLoader
 from core.executor import RemoteExecutor
 from core.logger import AuditLogger
 from core.version import __version__
+from execution.config_validation import validate_execution_configuration
 
 SOURCE_DIR = Path(__file__).resolve().parent
 BASE_DIR = (
@@ -121,6 +122,9 @@ def main() -> int:
         print(f"Configuração inválida: {exc}")
         return 2
 
+    catalog_report = validate_execution_configuration(settings)
+    settings = catalog_report.settings
+
     logging_config = settings.get("logging", {})
     logger = AuditLogger(
         LOG_DIR,
@@ -131,6 +135,27 @@ def main() -> int:
             logging_config.get("max_error_chars", 4000)
         ),
     )
+    if catalog_report.issues:
+        print("\n⚠ Catálogo de execuções com entradas desabilitadas:")
+        for issue in catalog_report.issues:
+            print(
+                f" - {issue.section}.{issue.key}: {issue.message}"
+            )
+        logger.log_event(
+            "execution_catalog_validation",
+            "local-ui",
+            "warning",
+            issues=[
+                {
+                    "section": issue.section,
+                    "key": issue.key,
+                    "message": issue.message,
+                }
+                for issue in catalog_report.issues
+            ],
+            enabled_counts=catalog_report.enabled_counts,
+        )
+
     executor = build_executor(settings, logger)
 
     if args.gui:

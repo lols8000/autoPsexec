@@ -1,210 +1,144 @@
-# Troubleshooting — Central N2 Workstation 5.1.0
+# Troubleshooting — Central N2 Workstation 5.2.0
 
-## Central não inicia
+## 1. Host resolve, ping responde, WinRM falha
 
-\`\`\`powershell
-python --version
-python .\central_n2\main.py --version
-\`\`\`
+Teste:
 
-Python 3.10+ é suportado pelo CI.
+```powershell
+Test-NetConnection HOST -Port 5985
+Test-NetConnection HOST -Port 445
+dir \\HOST\admin$
+```
 
-## Configuração inválida
+Se 5985 falhar e 445/ADMIN$ funcionarem, valide PsExec.
+
+A Central pode operar em READY_PSEXEC sem alterar política de WinRM.
+
+## 2. WinRM por IP falha
+
+Em domínio, prefira hostname/FQDN.
+
+Não use `TrustedHosts=*` como solução genérica.
+
+## 3. PsExec não aparece
 
 Valide:
 
-\`\`\`powershell
-Test-Path .\central_n2\config\settings.json
-\`\`\`
-
-\`settings.local.json\` deve conter JSON válido e é aplicado por merge recursivo.
-
-## UAC
-
-Se a elevação falhar, execute o terminal autorizado como administrador e revise política/UAC. Não contorne o controle.
-
-## Hostname não resolve
-
-\`\`\`powershell
-Resolve-DnsName PC023
-ping PC023
-\`\`\`
-
-Estado esperado da Central: \`DNS_FAILED\`.
-
-Prefira corrigir DNS a operar permanentemente por IP em domínio.
-
-## Ping falha
-
-Ping isolado não prova host offline. Teste serviços:
-
-\`\`\`powershell
-Test-NetConnection PC023 -Port 445
-Test-NetConnection PC023 -Port 5985
-\`\`\`
-
-A Central avalia portas independentemente do ICMP.
-
-## 5985 falha
-
-Possíveis causas:
-
-- WinRM parado;
-- listener ausente;
-- Firewall;
-- LocalSubnet;
-- ACL entre redes;
-- GPO.
-
-Se 445/ADMIN$/PsExec funcionarem, o host pode ficar \`READY_PSEXEC\`.
-
-## WinRM por IP / CannotUseIPAddress
-
-É tipicamente autenticação WinRM por IP, não reachability.
-
-Use hostname/FQDN quando possível.
-
-Evite \`TrustedHosts=*\`.
-
-## Test-WSMan funciona, mas Invoke-Command falha
-
-Na 5.1.0, o preflight já testa os dois. O host **não** deve ficar \`READY_WINRM\` se o \`Invoke-Command\` mínimo falhar.
-
-Teste manual equivalente:
-
-\`\`\`powershell
-Test-WSMan PC023
-Invoke-Command -ComputerName PC023 -ScriptBlock { 'CENTRAL_N2_WINRM_OK' }
-\`\`\`
-
-## PsExec não encontrado
-
-\`\`\`powershell
+```powershell
 Test-Path C:\Sysinternals\PsExec.exe
-Test-Path C:\Windows\System32\PsExec.exe
-Get-Command PsExec.exe -ErrorAction SilentlyContinue
-\`\`\`
+C:\Sysinternals\PsExec.exe -accepteula \\HOST hostname
+```
 
-Copie apenas binário homologado para diretório controlado. A Central não o baixa.
+ADMIN$ disponível não garante acesso ao Service Control Manager.
 
-## ADMIN$ funciona, mas PsExec não
+## 4. Ação aparece como BLOQUEADA
 
-ADMIN$ é requisito importante, mas não garante PsExec. Teste execução real:
+Leia os PolicyChecks.
 
-\`\`\`powershell
-C:\Sysinternals\PsExec.exe -accepteula -nobanner \\PC023 cmd.exe /d /c echo CENTRAL_N2_OK
-\`\`\`
+Exemplos:
 
-Revise EDR, SCM remoto, privilégio administrativo e política.
+```text
+✗ Transporte psexec não permitido.
+✗ Capability Winget indisponível.
+✗ Contexto USER_CONTEXT não confirmado.
+✗ Precondition: destino já existe.
+```
 
-## AUTHENTICATION_FAILED
+Não contorne o bloqueio editando o código em produção. Corrija o requisito ou escolha ação compatível.
 
-A rede responde, mas autenticação/autorização falhou em WinRM, ADMIN$ ou PsExec.
+## 5. Winget bloqueado em PsExec
 
-Não trate como falha de rede.
+É esperado em alguns contextos.
 
-## NO_USABLE_TRANSPORT
+Winget pode depender do perfil do usuário e não estar disponível sob SYSTEM/serviço remoto.
 
-O host é alcançável, porém nenhum transporte administrativo foi validado.
+Use transporte/contexto permitido pela policy.
 
-Use o menu Conectividade/Capabilities e separe cada camada.
+## 6. Resultado UNKNOWN
 
-## NETWORK_UNREACHABLE
+UNKNOWN significa falta de evidência final.
 
-Nenhum caminho administrativo conhecido respondeu. Revise rota, firewall, VLAN, host desligado e políticas.
+Causas comuns:
 
-## Resultado INDETERMINADO
+- timeout;
+- host caiu e não voltou;
+- postcheck falhou;
+- comando terminou sem resultado estruturado;
+- recurso mudou para estado não esperado.
 
-Sintoma: a ação pode ter sido enviada, mas a comunicação caiu.
+Não trate UNKNOWN como PASS ou FAIL automático.
 
-Conduta:
+## 7. Resultado indeterminate
 
-1. não repetir automaticamente;
-2. consultar o estado final;
-3. procurar evidência local/remota;
-4. decidir conscientemente se precisa repetir.
+A ação pode ter sido entregue, mas a confirmação foi perdida.
 
-O executor deve mostrar que o fallback foi suprimido.
+Procedimento:
 
-## Timeout
+1. não repetir imediatamente;
+2. consultar o estado;
+3. usar diagnóstico/postcheck pertinente;
+4. repetir apenas com evidência suficiente.
 
-Timeout da Central não prova que o processo remoto parou.
+## 8. Recovery falhou
 
-Antes de repetir DISM/SFC/install/reset, verifique processo, serviço ou log correspondente.
+Para DisconnectMode.TEMPORARY:
 
-## Winget retorna falso sucesso
+```text
+RECUPERAÇÃO: NÃO RECUPERADO
+```
 
-Na 5.1.0, install/upgrade/uninstall verificam \`$LASTEXITCODE\`. Se reaparecer falso sucesso, confirme a versão em execução.
+Verifique:
 
-## JSON não parseado após mutação
+- host voltou a responder;
+- DNS;
+- 445/5985;
+- ADMIN$;
+- PsExec;
+- boot em andamento;
+- DHCP/endereço alterado.
 
-Quando uma mutação termina mas o retorno estruturado não pode ser validado, o resultado é marcado como indeterminado. Investigue antes de repetir.
+O resultado deve permanecer UNKNOWN se a Central não comprovar o estado.
 
-## Spooler
+## 9. Rollback não aparece
 
-Após remediação, o validador exige \`Status=Running\`.
+Rollback só existe para ações reversíveis.
 
-UNKNOWN significa que a Central não conseguiu confirmar o estado final.
+Também deixa de estar disponível após rollback validado com PASS.
 
-## Reset de Windows Update
+Operações irreversíveis não oferecem opção U.
 
-A rotina registra os serviços originalmente ativos e tenta restaurá-los em \`finally\`. O validador exige confirmação de restauração.
+## 10. Catálogo corporativo não aparece
 
-## Compliance UNKNOWN
+No startup, procure warnings:
 
-UNKNOWN significa métrica indisponível, não falha.
+```text
+packages.chave: ...
+certificates.chave: ...
+registry_actions.chave: ...
+```
 
-Exemplo: TPM/Secure Boot podem ser indisponíveis por firmware/cmdlet/permissão.
+Entrada inválida é removida do catálogo efetivo.
 
-## Compliance N/A
+## 11. Banco falha no startup
 
-N/A significa que o baseline não exige o controle. Não é erro de coleta.
+SQLite executa quick_check e migrations sequenciais.
 
-## Bateria ausente
+Não altere `PRAGMA user_version` manualmente.
 
-Normal em desktop ou hardware que não expõe WMI de bateria.
+Faça backup do arquivo antes de intervenção.
 
-## Get-PhysicalDisk incompleto
+## 12. Driver inventory parece bruto
 
-RAID/controladores podem ocultar telemetria. Trate ausência de dados como limitação de evidência.
+A saída atual usa JSON estruturado e a UI deve renderizar campos de maneira amigável. Se aparecer CLIXML/ruído de transporte, registre o caso com correlation_id e transporte utilizado.
 
-## Logs
+## 13. Como coletar evidência
 
-Diretório:
+Use:
 
-\`\`\`text
-central_n2\logs
-\`\`\`
+- menu 19 para conectividade/capabilities;
+- menu 21 para histórico;
+- menu 23 para jobs;
+- relatório de suporte;
+- correlation_id exibido na UI.
 
-Não publique logs reais sem sanitização.
-
-## SQLite
-
-Se a Central reportar falha no \`quick_check\`, preserve o banco antes de qualquer tentativa de reparo.
-
-Não altere \`user_version\` manualmente.
-
-## Updater
-
-Falhas possíveis:
-
-- tag fora de SemVer;
-- asset com nome inválido;
-- URL não HTTPS;
-- tamanho divergente;
-- SHA-256 divergente;
-- erro de rede.
-
-Arquivo parcial deve ser removido e o destino final não deve ser promovido.
-
-## Checklist de transporte
-
-\`\`\`powershell
-Resolve-DnsName PC023
-Test-NetConnection PC023 -Port 445
-Test-NetConnection PC023 -Port 5985
-Test-Path \\PC023\ADMIN$
-Test-Path C:\Sysinternals\PsExec.exe
-Test-WSMan PC023
-Invoke-Command -ComputerName PC023 -ScriptBlock { hostname }
-\`\`\`
+Não publique logs reais no repositório público.
