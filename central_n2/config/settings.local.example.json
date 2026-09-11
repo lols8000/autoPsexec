@@ -15,7 +15,7 @@
   "packages": {
     "exemplo_msi": {
       "name": "Aplicativo Corporativo",
-      "source": "\\\\\\\\servidor\\\\share\\\\Aplicativo.msi",
+      "source": "\\\\servidor\\share\\Aplicativo.msi",
       "type": "msi",
       "args": "/qn /norestart",
       "cleanup": true,
@@ -25,7 +25,7 @@
   "certificates": {
     "raiz_corporativa": {
       "name": "CA Corporativa",
-      "source": "\\\\\\\\servidor\\\\share\\\\ca-corporativa.cer",
+      "source": "\\\\servidor\\share\\ca-corporativa.cer",
       "store": "Root"
     }
   },
