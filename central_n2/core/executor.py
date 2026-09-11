@@ -619,12 +619,13 @@ Invoke-Command -ComputerName '{safe_host}' -ScriptBlock {{
                 shell=False,
             )
             assert process.stdout is not None
+            stdout_stream = process.stdout
 
             events: queue.Queue[bytes | None] = queue.Queue()
 
             def reader() -> None:
                 try:
-                    for raw_line in iter(process.stdout.readline, b""):
+                    for raw_line in iter(stdout_stream.readline, b""):
                         events.put(raw_line)
                 finally:
                     events.put(None)
