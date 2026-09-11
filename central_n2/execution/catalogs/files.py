@@ -125,6 +125,48 @@ def register(registry, deps: ExecutionDependencies) -> None:
             parameters["source"],
         )
 
+    def rollback_path_must_be_safe(context, parameters):
+        result = deps.files.path_status(
+            context.host,
+            parameters["source"],
+            parameters["destination"],
+        )
+        if not result.success or not isinstance(result.data, dict):
+            return [
+                PolicyCheck(
+                    "file.move.rollback",
+                    PolicyState.FAIL,
+                    "Não foi possível validar os caminhos antes do rollback.",
+                    result.stderr,
+                )
+            ]
+        if result.data.get("DestinationExists") is not True:
+            return [
+                PolicyCheck(
+                    "file.move.rollback.destination",
+                    PolicyState.FAIL,
+                    "O destino atual não existe; não há o que mover de volta.",
+                    result.data,
+                )
+            ]
+        if result.data.get("SourceExists") is True:
+            return [
+                PolicyCheck(
+                    "file.move.rollback.source",
+                    PolicyState.FAIL,
+                    "A origem original voltou a existir; rollback bloqueado para evitar overwrite.",
+                    result.data,
+                )
+            ]
+        return [
+            PolicyCheck(
+                "file.move.rollback",
+                PolicyState.PASS,
+                "Destino existe e origem original está livre para rollback.",
+                result.data,
+            )
+        ]
+
     def validate_move_rollback(before, command, after, parameters):
         data = _payload(after)
         if command.indeterminate:
@@ -185,6 +227,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
         ),
         validator=validate_move,
         preconditions=(destination_must_be_absent,),
+        rollback_preconditions=(rollback_path_must_be_safe,),
         rollback_handler=rollback_move,
         rollback_validator=validate_move_rollback,
     )
