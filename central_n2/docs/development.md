@@ -58,6 +58,8 @@ Preencha conscientemente:
 - action_version;
 - idempotent;
 - retry_policy;
+- retry_attempts;
+- retry_delay_seconds;
 - allowed_transports;
 - required_capabilities;
 - required_privilege;
@@ -81,11 +83,18 @@ Não desabilite essas validações para fazer catálogo carregar.
 
 ## Retry
 
-O ExecutionEngine não faz retry automático de mutações.
+O ExecutionEngine possui retry seletivo.
 
-O RemoteExecutor só faz fallback de mutação quando a falha é comprovadamente pré-execução.
+Regras:
 
-Nunca implemente loop genérico de retry ao redor de handler mutável.
+- nunca repetir resultado `indeterminate`;
+- `PRE_EXECUTION_ONLY` só repete resultado com `transport_failure_kind=pre_execution`;
+- `SAFE_TRANSIENT` exige `idempotent=True` e pode aceitar `retry_safe=true`;
+- respeitar `retry_attempts` e `retry_delay_seconds`.
+
+O RemoteExecutor continua responsável por fallback de transporte e só faz fallback de mutação quando a falha é comprovadamente pré-execução.
+
+Nunca implemente loop genérico de retry fora desse contrato.
 
 ## Preconditions
 
@@ -111,7 +120,10 @@ Requisitos:
 - parâmetros originais;
 - postcheck;
 - rollback validator;
+- `rollback_preconditions` quando a reversão tiver pré-condições diferentes da ida;
 - auditoria.
+
+Nunca reutilize automaticamente `preconditions` da execução para o rollback: o estado pós-ação pode, por definição, invalidar a condição original.
 
 Não adicione rollback “best effort” sem prova de estado.
 
