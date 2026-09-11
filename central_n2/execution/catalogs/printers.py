@@ -3,9 +3,20 @@ from __future__ import annotations
 from core.jobs import OperationClass
 from remediation import validate_spooler
 
-from ..models import ExecutionAction, ExecutionParameter, ParameterKind, RiskLevel
+from ..models import (
+    ExecutionAction,
+    ExecutionParameter,
+    ParameterKind,
+    RiskLevel,
+    SelectorKind,
+)
 from ..validators import command_completed
-from .common import ExecutionDependencies, _printer_exists, _register, _wrap_three_arg
+from .common import (
+    ExecutionDependencies,
+    _printer_exists,
+    _register,
+    _wrap_three_arg,
+)
 
 
 def register(registry, deps: ExecutionDependencies) -> None:
@@ -21,6 +32,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.LOW,
             "Jobs em processamento podem ser interrompidos temporariamente.",
             180,
+            idempotent=True,
+            tags=("impressão", "spooler", "printer"),
         ),
         lambda host, p: deps.printers.restart_spooler(host),
         before_probe=lambda host, p: deps.printers.spooler_status(host),
@@ -40,14 +53,17 @@ def register(registry, deps: ExecutionDependencies) -> None:
             "Trabalhos pendentes serão perdidos.",
             180,
             destructive=True,
+            required_capabilities=("PrinterManagement",),
             parameters=(
                 ExecutionParameter(
                     "printer_name",
                     "Impressora (vazio = todas)",
                     ParameterKind.TEXT,
                     required=False,
+                    selector=SelectorKind.PRINTER,
                 ),
             ),
+            tags=("impressão", "fila", "printjob"),
         ),
         lambda host, p: deps.printers.clear_queue(
             host,
@@ -62,11 +78,12 @@ def register(registry, deps: ExecutionDependencies) -> None:
             "Adicionar impressora compartilhada",
             "printers",
             "Impressão",
-            r"Adiciona conexão \\\\servidor\\fila.",
+            r"Adiciona conexão \\servidor\fila.",
             OperationClass.LIGHT_WRITE,
             RiskLevel.MEDIUM,
             "Adiciona impressora ao sistema.",
             240,
+            required_capabilities=("PrinterManagement",),
             parameters=(
                 ExecutionParameter(
                     "connection_name",
@@ -74,6 +91,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
                     ParameterKind.TEXT,
                 ),
             ),
+            tags=("impressão", "adicionar", "compartilhada"),
         ),
         lambda host, p: deps.printers.add_connection(
             host,
@@ -98,13 +116,16 @@ def register(registry, deps: ExecutionDependencies) -> None:
             "Remove configuração de impressão da estação.",
             180,
             destructive=True,
+            required_capabilities=("PrinterManagement",),
             parameters=(
                 ExecutionParameter(
                     "printer_name",
-                    "Nome da impressora",
+                    "Impressora",
                     ParameterKind.TEXT,
+                    selector=SelectorKind.PRINTER,
                 ),
             ),
+            tags=("impressão", "remover", "printer"),
         ),
         lambda host, p: deps.printers.remove_printer(
             host,
