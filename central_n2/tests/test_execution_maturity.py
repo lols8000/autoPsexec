@@ -14,6 +14,7 @@ from execution import (
     ExecutionEngine,
     ExecutionParameter,
     ExecutionPolicyContext,
+    ExecutionRollbackRecord,
     ParameterKind,
     PrivilegeLevel,
     RecoveryResult,
@@ -856,3 +857,81 @@ def test_audit_payload_keeps_only_safe_execution_metadata():
     assert metadata["execution_attempts"] == 1
     assert "credential" not in metadata
     assert "must-not-persist" not in str(payload)
+
+
+
+def test_database_links_rollback_and_consumes_parent_availability(tmp_path: Path):
+    database = CentralDatabase(tmp_path / "central.db")
+
+    registry = ActionRegistry()
+    registry.register(
+        BoundExecutionAction(
+            spec=ExecutionAction(
+                key="service.rollback.persist",
+                title="Rollback persist",
+                category="services",
+                category_label="Serviços",
+                description="Test.",
+                operation_class=OperationClass.LIGHT_WRITE,
+                risk=RiskLevel.LOW,
+                impact="None.",
+                rollback_strategy="Restore.",
+            ),
+            handler=lambda host, params: CommandResult(
+                True,
+                "apply",
+                host,
+                transport="winrm",
+            ),
+            rollback_handler=lambda host, params, before: CommandResult(
+                True,
+                "rollback",
+                host,
+                transport="winrm",
+            ),
+        )
+    )
+    engine = ExecutionEngine(registry)
+    record = engine.execute(
+        "PC01",
+        "service.rollback.persist",
+        {},
+        context=_context(),
+        operator="operator",
+    )
+    parent_id = database.save_execution_record(
+        record,
+        correlation_id="ROLL001",
+    )
+
+    rollback = ExecutionRollbackRecord(
+        action_key=record.action.key,
+        host="PC01",
+        result=CommandResult(
+            True,
+            "rollback",
+            "PC01",
+            transport="winrm",
+        ),
+        validation=ValidationResult(
+            ValidationStatus.PASS,
+            "restored",
+        ),
+        started_at="2026-09-11T12:00:00+00:00",
+        finished_at="2026-09-11T12:00:01+00:00",
+        duration_ms=1000,
+    )
+    child_id = database.save_rollback_record(
+        rollback,
+        original_execution_id=parent_id,
+        operator="operator",
+        correlation_id="ROLL001",
+    )
+
+    rows = database.recent_executions("PC01", limit=5)
+    by_id = {row["id"]: row for row in rows}
+
+    assert by_id[parent_id]["rollback_available"] == 0
+    assert by_id[child_id]["rollback_of"] == parent_id
+    assert by_id[child_id]["is_rollback"] == 1
+    assert by_id[child_id]["validation_state"] == "PASS"
