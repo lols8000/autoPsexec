@@ -975,11 +975,27 @@ class ConsoleUIV5(ConsoleBase):
         if not executions:
             print("Nenhuma execução registrada.")
         for item in executions:
+            rollback_marker = (
+                f" rollback-of=#{item.get('rollback_of')}"
+                if item.get("is_rollback")
+                else ""
+            )
+            duration = item.get("duration_ms")
+            duration_text = (
+                f"{int(duration) / 1000:.1f}s"
+                if duration is not None
+                else "-"
+            )
             print(
                 f"#{item['id']} {item['created_at']} | "
                 f"{item['validation_state']:<7} | "
+                f"{item.get('risk') or '-':<8} | "
+                f"{item.get('transport') or '-':<7} | "
+                f"{duration_text:<7} | "
                 f"{item['action']} | "
+                f"{item.get('operator') or '-'} | "
                 f"{item.get('correlation_id') or '-'}"
+                f"{rollback_marker}"
             )
 
         print("\nDIFF DOS DOIS ÚLTIMOS HEALTH:")
@@ -1019,7 +1035,31 @@ class ConsoleUIV5(ConsoleBase):
         )
 
         validation: Any = self.context.health_snapshot
-        if self.context.remediation:
+        if self.context.execution:
+            execution = self.context.execution
+            actions.append(
+                f"Execução: {execution.action.title} — "
+                f"{execution.remediation.validation.status.value}"
+            )
+            validation = {
+                "type": "execution",
+                "action": execution.action.key,
+                "action_version": execution.action.action_version,
+                "risk": execution.action.risk.value,
+                "transport": execution.remediation.command_result.transport,
+                "operator": execution.operator,
+                "duration_ms": execution.duration_ms,
+                "parameters": execution.public_parameters,
+                "status": execution.remediation.validation.status.value,
+                "message": execution.remediation.validation.message,
+                "evidence": execution.remediation.validation.evidence,
+                "recovery": execution.recovery,
+                "rollback_available": execution.rollback_available,
+                "rollback_performed": (
+                    execution.rollback_result is not None
+                ),
+            }
+        elif self.context.remediation:
             remediation = self.context.remediation
             actions.append(
                 f"Remediação: {remediation.spec.title} — "
