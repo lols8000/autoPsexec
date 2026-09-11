@@ -627,7 +627,7 @@ def build_execution_registry(
         lambda host, p: deps.network.renew_dhcp(host),
         validator=command_completed,
     )
-    for key, title, handler, reboot in (
+    for key, title, network_handler, reboot in (
         (
             "network.reset_winsock",
             "Resetar Winsock",
@@ -666,7 +666,7 @@ def build_execution_registry(
                 requires_reboot=reboot,
                 may_break_connectivity=reboot,
             ),
-            lambda host, p, fn=handler: fn(host),
+            lambda host, p, fn=network_handler: fn(host),
             validator=command_completed,
         )
 
