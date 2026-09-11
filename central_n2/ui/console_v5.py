@@ -958,6 +958,21 @@ class ConsoleUIV5(ConsoleBase):
                 f"[{record.get('correlation_id') or '-'}]"
             )
 
+        print("\nEXECUÇÕES RECENTES:")
+        executions = self.db.recent_executions(
+            self.host,
+            limit=10,
+        )
+        if not executions:
+            print("Nenhuma execução registrada.")
+        for item in executions:
+            print(
+                f"#{item['id']} {item['created_at']} | "
+                f"{item['validation_state']:<7} | "
+                f"{item['action']} | "
+                f"{item.get('correlation_id') or '-'}"
+            )
+
         print("\nDIFF DOS DOIS ÚLTIMOS HEALTH:")
         changes = self.db.diff_latest(self.host, kind="health")
         if not changes:
@@ -1713,14 +1728,10 @@ class ConsoleUIV5(ConsoleBase):
         )
 
         if self.db:
-            validated = (
-                remediation.validation.status
-                is ValidationStatus.PASS
-            )
-            self.db.save_remediation(
+            self.db.save_execution(
                 self.host,
                 bound.spec.key,
-                validated,
+                remediation.validation.status.value,
                 asdict(record),
                 correlation_id=self.context.correlation_id,
             )
