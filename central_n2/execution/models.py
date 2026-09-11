@@ -47,6 +47,12 @@ class DisconnectMode(str, Enum):
     TERMINAL = "TERMINAL"
 
 
+class RetryPolicy(str, Enum):
+    NEVER = "NEVER"
+    PRE_EXECUTION_ONLY = "PRE_EXECUTION_ONLY"
+    SAFE_TRANSIENT = "SAFE_TRANSIENT"
+
+
 @dataclass(frozen=True, slots=True)
 class ExecutionParameter:
     key: str
@@ -129,6 +135,7 @@ class ExecutionAction:
     recommendation: str | None = None
     action_version: int = 1
     idempotent: bool = False
+    retry_policy: RetryPolicy = RetryPolicy.NEVER
     allowed_transports: tuple[str, ...] = (
         "local",
         "winrm",
@@ -229,6 +236,8 @@ class ExecutionRecord:
                 "risk": self.action.risk.value,
                 "operation_class": self.action.operation_class.value,
                 "disconnect_mode": self.action.disconnect_mode.value,
+                "retry_policy": self.action.retry_policy.value,
+                "idempotent": self.action.idempotent,
                 "rollback_strategy": self.action.rollback_strategy,
             },
             "parameters": redact(self.public_parameters),
