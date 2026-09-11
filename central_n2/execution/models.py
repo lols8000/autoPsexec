@@ -229,6 +229,23 @@ class ExecutionRecord:
                 "error": redact(self.recovery.error),
             }
 
+        safe_command_metadata = {
+            key: command.metadata.get(key)
+            for key in (
+                "execution_attempt",
+                "execution_attempts",
+                "retry_policy",
+                "retry_scheduled",
+                "fallback_from",
+                "fallback_reason",
+                "fallback_suppressed",
+                "transport_failure_kind",
+                "disconnect_mode",
+                "action_version",
+            )
+            if key in command.metadata
+        }
+
         return {
             "action": {
                 "key": self.action.key,
@@ -255,6 +272,7 @@ class ExecutionRecord:
                 "indeterminate": command.indeterminate,
                 "error": redact(command.stderr),
                 "data": redact(command.data),
+                "metadata": redact(safe_command_metadata),
             },
             "before": redact(self.remediation.before),
             "after": redact(self.remediation.after),
