@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from core.jobs import OperationClass
-from ..models import ExecutionAction, ExecutionParameter, ParameterKind, RiskLevel
+
+from ..models import (
+    ExecutionAction,
+    ExecutionParameter,
+    ParameterKind,
+    RiskLevel,
+    SelectorKind,
+)
 from .common import ExecutionDependencies, _process_absent, _register
 
 
@@ -20,8 +27,14 @@ def register(registry, deps: ExecutionDependencies) -> None:
             120,
             destructive=True,
             parameters=(
-                ExecutionParameter("process_name", "Nome do processo", ParameterKind.TEXT),
+                ExecutionParameter(
+                    "process_name",
+                    "Processo",
+                    ParameterKind.TEXT,
+                    selector=SelectorKind.PROCESS,
+                ),
             ),
+            tags=("processo", "process", "kill", "encerrar"),
         ),
         lambda host, p: deps.system.kill_process(host, p["process_name"]),
         before_probe=lambda host, p: deps.system.process_status(
@@ -54,8 +67,10 @@ def register(registry, deps: ExecutionDependencies) -> None:
                     ParameterKind.INTEGER,
                     min_value=1,
                     max_value=2_147_483_647,
+                    selector=SelectorKind.PROCESS,
                 ),
             ),
+            tags=("processo", "process", "pid", "kill"),
         ),
         lambda host, p: deps.system.kill_process_pid(host, p["pid"]),
         before_probe=lambda host, p: deps.system.process_status(
