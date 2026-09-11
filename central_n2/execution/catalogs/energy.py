@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from core.jobs import OperationClass
-from ..models import ExecutionAction, ExecutionParameter, ParameterKind, RiskLevel
-from ..validators import command_completed
+
+from ..models import (
+    DisconnectMode,
+    ExecutionAction,
+    ExecutionParameter,
+    ParameterKind,
+    RiskLevel,
+)
+from ..validators import command_completed, postcheck_succeeded
 from .common import ExecutionDependencies, _register
 
 
@@ -14,13 +21,14 @@ def register(registry, deps: ExecutionDependencies) -> None:
             "Reiniciar estação",
             "energy",
             "Energia / Sessões",
-            "Agenda reinicialização administrativa.",
+            "Reinicia a estação e aguarda o transporte administrativo voltar.",
             OperationClass.DISRUPTIVE,
             RiskLevel.CRITICAL,
             "Interrompe sessões e indisponibiliza a estação temporariamente.",
-            180,
+            540,
             may_break_connectivity=True,
             destructive=True,
+            requires_reboot=True,
             parameters=(
                 ExecutionParameter(
                     "delay_seconds",
@@ -32,12 +40,18 @@ def register(registry, deps: ExecutionDependencies) -> None:
                     max_value=3600,
                 ),
             ),
+            allowed_transports=("winrm", "psexec"),
+            disconnect_mode=DisconnectMode.TEMPORARY,
+            recovery_timeout_seconds=420,
+            recovery_delay_seconds=15,
+            tags=("energia", "reboot", "restart", "reiniciar"),
         ),
         lambda host, p: deps.system.restart(
             host,
             p["delay_seconds"],
         ),
-        validator=command_completed,
+        after_probe=lambda host, p: deps.health.snapshot(host),
+        validator=postcheck_succeeded,
     )
     _register(
         registry,
@@ -46,7 +60,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
             "Desligar estação",
             "energy",
             "Energia / Sessões",
-            "Agenda desligamento administrativo.",
+            "Agenda desligamento administrativo da estação remota.",
             OperationClass.DISRUPTIVE,
             RiskLevel.CRITICAL,
             "Interrompe sessões e desliga a estação.",
@@ -64,6 +78,9 @@ def register(registry, deps: ExecutionDependencies) -> None:
                     max_value=3600,
                 ),
             ),
+            allowed_transports=("winrm", "psexec"),
+            disconnect_mode=DisconnectMode.TERMINAL,
+            tags=("energia", "shutdown", "desligar"),
         ),
         lambda host, p: deps.system.shutdown(
             host,
@@ -83,6 +100,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.LOW,
             "Cancela temporizador de energia pendente.",
             120,
+            idempotent=True,
+            tags=("energia", "abort", "cancelar"),
         ),
         lambda host, p: deps.system.abort_shutdown(host),
         validator=command_completed,
@@ -106,6 +125,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
                     ParameterKind.TEXT,
                 ),
             ),
+            tags=("sessão", "mensagem", "msg"),
         ),
         lambda host, p: deps.system.send_message(
             host,
