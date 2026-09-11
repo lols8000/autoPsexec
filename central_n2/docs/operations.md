@@ -131,7 +131,7 @@ Confirmação:
 DESFAZER <hostname>
 ```
 
-Rollback é validado e persistido como nova execução ligada à original.
+Rollback é validado e persistido como nova execução ligada à original. Um rollback bem-sucedido consome a disponibilidade de rollback do registro pai. Guardas do rollback são avaliadas separadamente das preconditions da execução original.
 
 Não existe rollback automático para operações irreversíveis.
 
@@ -139,7 +139,11 @@ Não existe rollback automático para operações irreversíveis.
 
 Padrão: `PRE_EXECUTION_ONLY`.
 
-Nunca repita uma mutação apenas porque houve timeout. Antes:
+A Central pode repetir automaticamente somente quando a falha é comprovadamente anterior à entrega da ação. O número máximo e o atraso entre tentativas são definidos no contrato da ação.
+
+`indeterminate` nunca é repetido automaticamente.
+
+Depois de timeout/perda de sessão com entrega incerta:
 
 1. consulte o estado;
 2. verifique se a ação pode ter sido entregue;
