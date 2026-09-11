@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.jobs import OperationClass
+from core.redaction import redact
 from core.result import CommandResult
 from execution import (
     ActionRegistry,
@@ -653,3 +654,205 @@ def test_database_redacts_legacy_execution_payload(tmp_path: Path):
     assert "secret-password" not in encoded
     assert row["payload"]["token"] == "***"
     assert row["payload"]["nested"]["password"] == "***"
+
+
+
+def test_pre_execution_failure_is_retried_safely():
+    calls = 0
+
+    def handler(host, parameters):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            result = CommandResult.failure(
+                host,
+                "mutation",
+                "connection refused",
+                transport="winrm",
+            )
+            result.metadata["transport_failure_kind"] = "pre_execution"
+            return result
+        return CommandResult(
+            True,
+            "mutation",
+            host,
+            transport="psexec",
+            data={"Applied": True},
+        )
+
+    registry = ActionRegistry()
+    registry.register(
+        BoundExecutionAction(
+            spec=ExecutionAction(
+                key="retry.pre_execution",
+                title="Retry seguro",
+                category="test",
+                category_label="Test",
+                description="Teste.",
+                operation_class=OperationClass.LIGHT_WRITE,
+                risk=RiskLevel.LOW,
+                impact="None.",
+                retry_policy=RetryPolicy.PRE_EXECUTION_ONLY,
+                retry_attempts=2,
+                retry_delay_seconds=0,
+            ),
+            handler=handler,
+            validator=command_completed,
+        )
+    )
+
+    record = ExecutionEngine(registry).execute(
+        "PC01",
+        "retry.pre_execution",
+        {},
+        context=_context(),
+    )
+
+    assert calls == 2
+    assert record.remediation.command_result.success is True
+    assert (
+        record.remediation.command_result.metadata["execution_attempts"]
+        == 2
+    )
+    assert record.remediation.validation.status is ValidationStatus.PASS
+
+
+def test_rollback_uses_rollback_preconditions_not_forward_preconditions():
+    state = {"phase": "before"}
+
+    def forward_guard(context, parameters):
+        return [
+            PolicyCheck(
+                "forward.guard",
+                (
+                    PolicyState.PASS
+                    if state["phase"] == "before"
+                    else PolicyState.FAIL
+                ),
+                "forward",
+            )
+        ]
+
+    def rollback_guard(context, parameters):
+        return [
+            PolicyCheck(
+                "rollback.guard",
+                (
+                    PolicyState.PASS
+                    if state["phase"] == "after"
+                    else PolicyState.FAIL
+                ),
+                "rollback",
+            )
+        ]
+
+    def handler(host, parameters):
+        state["phase"] = "after"
+        return CommandResult(True, "apply", host)
+
+    def rollback(host, parameters, before):
+        state["phase"] = "before"
+        return CommandResult(True, "rollback", host)
+
+    registry = ActionRegistry()
+    registry.register(
+        BoundExecutionAction(
+            spec=ExecutionAction(
+                key="guarded.rollback",
+                title="Guarded rollback",
+                category="test",
+                category_label="Test",
+                description="Test.",
+                operation_class=OperationClass.LIGHT_WRITE,
+                risk=RiskLevel.LOW,
+                impact="None.",
+                rollback_strategy="Restaurar.",
+            ),
+            handler=handler,
+            preconditions=(forward_guard,),
+            rollback_preconditions=(rollback_guard,),
+            rollback_handler=rollback,
+        )
+    )
+    engine = ExecutionEngine(registry)
+
+    record = engine.execute(
+        "PC01",
+        "guarded.rollback",
+        {},
+        context=_context(),
+    )
+    assert state["phase"] == "after"
+
+    reverted = engine.rollback(
+        record,
+        context=_context(),
+    )
+
+    assert reverted.result.success is True
+    assert state["phase"] == "before"
+
+
+def test_redaction_recurses_into_command_result_dataclass():
+    result = CommandResult(
+        True,
+        "test",
+        "PC01",
+        data={
+            "token": "top-secret-token",
+            "nested": {"password": "top-secret-password"},
+        },
+    )
+
+    sanitized = redact(result)
+    encoded = str(sanitized)
+
+    assert "top-secret-token" not in encoded
+    assert "top-secret-password" not in encoded
+    assert sanitized["data"]["token"] == "***"
+    assert sanitized["data"]["nested"]["password"] == "***"
+
+
+def test_audit_payload_keeps_only_safe_execution_metadata():
+    registry = ActionRegistry()
+
+    def handler(host, parameters):
+        result = CommandResult(
+            True,
+            "test",
+            host,
+            transport="winrm",
+        )
+        result.metadata["credential"] = "must-not-persist"
+        result.metadata["fallback_from"] = "winrm"
+        return result
+
+    registry.register(
+        BoundExecutionAction(
+            spec=ExecutionAction(
+                key="audit.metadata",
+                title="Audit metadata",
+                category="test",
+                category_label="Test",
+                description="Test.",
+                operation_class=OperationClass.LIGHT_WRITE,
+                risk=RiskLevel.LOW,
+                impact="None.",
+            ),
+            handler=handler,
+        )
+    )
+
+    record = ExecutionEngine(registry).execute(
+        "PC01",
+        "audit.metadata",
+        {},
+        context=_context(),
+    )
+    payload = record.audit_payload()
+    metadata = payload["command"]["metadata"]
+
+    assert metadata["fallback_from"] == "winrm"
+    assert metadata["execution_attempts"] == 1
+    assert "credential" not in metadata
+    assert "must-not-persist" not in str(payload)
