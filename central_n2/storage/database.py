@@ -639,6 +639,15 @@ class CentralDatabase:
                     1,
                 ),
             )
+            if validation.status.value == "PASS":
+                connection.execute(
+                    """
+                    UPDATE executions
+                    SET rollback_available=0
+                    WHERE id=?
+                    """,
+                    (original_execution_id,),
+                )
             return int(cursor.lastrowid)
 
     def recent_executions(
