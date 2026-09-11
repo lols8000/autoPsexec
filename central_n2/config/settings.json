@@ -60,5 +60,8 @@
   "logging": {
     "verbose_payloads": false,
     "max_error_chars": 4000
-  }
+  },
+  "packages": {},
+  "certificates": {},
+  "registry_actions": {}
 }
