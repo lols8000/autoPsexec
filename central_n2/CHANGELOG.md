@@ -1,5 +1,55 @@
 # Changelog
 
+## 5.2.0 — 2026-09-11
+
+### Central de Execuções
+
+- adicionado menu 28 com catálogo dinâmico, busca por texto/tags e atalhos contextuais;
+- catálogo monolítico quebrado em 18 domínios sob `execution/catalogs/`;
+- `ExecutionAction` passou a declarar risco, timeout, idempotência, retry, transportes, privilege, capabilities, disconnect mode, rollback e tags;
+- registry valida invariantes de contrato antes de aceitar uma ação;
+- parâmetros podem usar seletores de processos, serviços, adaptadores, impressoras, perfis, PnP e sessões.
+
+### Policy, recovery e segurança de mutação
+
+- `ExecutionPolicy` avalia sessão, transporte, privilege, capabilities e preconditions antes da confirmação;
+- ações incompatíveis são bloqueadas antes do handler;
+- `RetryPolicy` formalizada com NEVER, PRE_EXECUTION_ONLY e SAFE_TRANSIENT;
+- SAFE_TRANSIENT exige idempotência;
+- ExecutionEngine não faz retry cego de mutação;
+- DisconnectMode NONE/TEMPORARY/TERMINAL;
+- DHCP renew, restart de NIC e reboot podem usar recovery e postcheck após reconexão;
+- resultado indeterminado continua preservado e só pode virar PASS após evidência pós-recovery suficiente.
+
+### Rollback
+
+- rollback real para Start/Stop e StartType de serviço;
+- rollback de RegistryAction homologada para valor/ausência anterior;
+- move/rename protegido pode retornar ao caminho original;
+- rollback possui confirmação reforçada, validador e registro próprio;
+- ações irreversíveis não recebem rollback fictício.
+
+### Catálogos corporativos
+
+- adicionadas allowlists de packages, certificates e registry_actions;
+- configuração é validada/sanitizada no bootstrap;
+- entradas inválidas são desabilitadas sem derrubar a aplicação;
+- certificados privados/PFX e Registro fora de HKLM permanecem fora do fluxo.
+
+### Auditoria e persistência
+
+- SQLite promovido para schema 4;
+- execution records armazenam operador, action_version, transporte, timestamps, duração, risco, parâmetros redigidos e correlation_id;
+- rollbacks são ligados à execução original por rollback_of/is_rollback;
+- `ExecutionRecord.audit_payload()` evita persistência de comando bruto e aplica redaction;
+- persistência legada de execution também passa pelo redactor.
+
+### Qualidade
+
+- testes de policy, preconditions, disconnect/recovery, rollback, busca, allowlists, redaction, SQLite v4 e retry safety;
+- pacote execution incluído em Ruff, mypy e coverage;
+- documentação técnica revisada para 5.2.
+
 ## 5.1.0 — 2026-09-10
 
 ### Arquitetura
