@@ -101,6 +101,39 @@ class ActionRegistry:
                 f"Ação {spec.key}: rollback handler exige estratégia documentada."
             )
 
+        if (
+            spec.rollback_strategy
+            and action.rollback_handler is None
+        ):
+            raise ValueError(
+                f"Ação {spec.key}: estratégia de rollback exige handler."
+            )
+
+        if (
+            (
+                action.rollback_validator is not None
+                or action.rollback_preconditions
+            )
+            and action.rollback_handler is None
+        ):
+            raise ValueError(
+                f"Ação {spec.key}: validator/preconditions de rollback exigem handler."
+            )
+
+        if spec.disconnect_mode is DisconnectMode.TEMPORARY:
+            if action.after_probe is None or action.validator is None:
+                raise ValueError(
+                    f"Ação {spec.key}: TEMPORARY exige postcheck e validator."
+                )
+
+        if (
+            spec.disconnect_mode is DisconnectMode.TERMINAL
+            and not spec.may_break_connectivity
+        ):
+            raise ValueError(
+                f"Ação {spec.key}: TERMINAL deve declarar may_break_connectivity."
+            )
+
     def register(self, action: BoundExecutionAction) -> None:
         key = action.spec.key
         if key in self._actions:
