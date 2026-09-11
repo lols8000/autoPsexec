@@ -8,7 +8,8 @@
 - catálogo monolítico quebrado em 18 domínios sob `execution/catalogs/`;
 - `ExecutionAction` passou a declarar risco, timeout, idempotência, retry, transportes, privilege, capabilities, disconnect mode, rollback e tags;
 - registry valida invariantes de contrato antes de aceitar uma ação;
-- parâmetros podem usar seletores de processos, serviços, adaptadores, impressoras, perfis, PnP e sessões.
+- parâmetros podem usar seletores de processos, serviços, adaptadores, impressoras, perfis, PnP e sessões;
+- seletores de perfil/sessão passaram a usar inventários leves/estruturados, sem varredura recursiva ou parsing frágil de quser.
 
 ### Policy, recovery e segurança de mutação
 
@@ -31,7 +32,15 @@
 - rollback_preconditions são independentes das preconditions da execução original;
 - file.move bloqueia rollback quando a origem original voltou a existir, evitando overwrite;
 - rollback PASS consome a disponibilidade de rollback do registro pai;
-- ações irreversíveis não recebem rollback fictício.
+- ações irreversíveis não recebem rollback fictício;
+- AttendanceContext mantém pilha LIFO de execuções reversíveis, preservando rollback mesmo após ações não reversíveis.
+
+### Escopo de arquivos
+
+- FileOperationsModule passou a exigir raízes autorizadas;
+- defaults seguros: C:\CentralN2 e C:\Temp;
+- traversal com .. e caminhos fora da allowlist são bloqueados antes do PowerShell;
+- execution.file_roots é validado/sanitizado no bootstrap.
 
 ### Catálogos corporativos
 
