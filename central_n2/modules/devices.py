@@ -44,6 +44,18 @@ $d = Get-PnpDevice -InstanceId {safe} -ErrorAction SilentlyContinue
 """
         return self.executor.execute_powershell_json(host, script)
 
+    def present_devices(self, host: str) -> CommandResult:
+        script = r"""
+Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+    Select-Object Class,FriendlyName,InstanceId,Status,Problem |
+    Sort-Object Class,FriendlyName
+"""
+        return self.executor.execute_powershell_json(
+            host,
+            script,
+            timeout=180,
+        )
+
     def drivers(self, host: str) -> CommandResult:
         script = r"""
 Get-CimInstance Win32_PnPSignedDriver |
