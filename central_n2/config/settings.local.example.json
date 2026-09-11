@@ -38,5 +38,11 @@
       "value": 1,
       "mode": "set"
     }
+  },
+  "execution": {
+    "file_roots": [
+      "C:\\CentralN2",
+      "C:\\Temp"
+    ]
   }
 }
