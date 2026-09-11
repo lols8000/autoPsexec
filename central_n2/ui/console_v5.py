@@ -1571,6 +1571,13 @@ class ConsoleUIV5(ConsoleBase):
     def menu_execution(self, category: str | None = None) -> None:
         if not self.require_host():
             return
+        if not self.context.session or not self.context.session.ready:
+            print(
+                "Nenhum transporte administrativo validado para a estação. "
+                "Execute o preflight/conectividade antes de usar a Central de Execuções."
+            )
+            self.pause()
+            return
 
         selected_category = category
 
