@@ -1,252 +1,175 @@
-# Desenvolvimento — Central N2 Workstation 5.1.0
+# Desenvolvimento — Central N2 Workstation 5.2.0
 
 ## Objetivo
 
-Evoluir a Central sem degradar segurança, previsibilidade operacional ou manutenibilidade.
+Adicionar capacidade sem degradar previsibilidade, segurança ou manutenção.
 
-## Ambiente
+## Estrutura relevante
 
-- Windows;
-- Python 3.10+;
-- Git;
-- dependências de desenvolvimento fixadas em \`requirements-dev.txt\`.
-
-\`\`\`powershell
-cd central_n2
-python -m pip install -r requirements-dev.txt
-\`\`\`
-
-## Estrutura
-
-\`\`\`text
+```text
 central_n2/
-├── main.py
-├── config/
 ├── core/
-│   ├── actions.py
-│   ├── context.py
-│   ├── evaluation.py
-│   ├── executor.py
-│   ├── jobs.py
-│   ├── logger.py
-│   └── transport/
 ├── diagnostics/
+├── execution/
+│   ├── catalog.py
+│   ├── engine.py
+│   ├── models.py
+│   ├── policy.py
+│   ├── registry.py
+│   ├── validators.py
+│   ├── config_validation.py
+│   └── catalogs/
 ├── modules/
-├── playbooks/
 ├── remediation/
-├── reports/
 ├── storage/
 ├── ui/
-│   ├── console_base.py
-│   ├── console_v5.py
-│   └── tk_app.py
 ├── tests/
 └── docs/
-\`\`\`
+```
 
-\`console_v3.py\` é histórico/compatibilidade. A UI operacional 5.1 não deve voltar a herdar essa classe.
+`execution/catalog.py` é apenas composition root. Não volte a concentrar dezenas de ações em um arquivo monolítico.
 
-## Dependência
+## Como adicionar uma ação
 
-\`\`\`text
-UI
- ↓
-orquestração/core
- ↓
-módulos
- ↓
-RemoteExecutor
- ↓
-transportes
-\`\`\`
+1. implemente a operação no módulo de domínio;
+2. use API mutável do RemoteExecutor;
+3. crie/edite o arquivo de domínio em `execution/catalogs/`;
+4. descreva `ExecutionAction`;
+5. adicione parâmetros tipados;
+6. configure before/after probes;
+7. use validator específico;
+8. declare capabilities/transport/privilege;
+9. declare disconnect/recovery quando aplicável;
+10. declare rollback somente se real;
+11. adicione tags;
+12. escreva testes.
 
-Não permita:
+## ExecutionAction
 
-- transporte importando UI;
-- módulo chamando \`input()\`;
-- regra de negócio específica dentro do executor;
-- componente relendo configuração sem necessidade;
-- mutação usando API de leitura apenas para obter fallback conveniente.
+Preencha conscientemente:
 
-## Configuração
-
-\`ConfigLoader\` é chamado no bootstrap. A configuração efetiva é injetada nos componentes principais.
-
-Novo componente deve receber dependência/configuração pronta quando possível.
-
-## Estado
-
-Todo estado de um atendimento pertence a \`AttendanceContext\`.
-
-Não crie aliases como:
-
-\`\`\`python
-self.last_report = self.context.report_path
-\`\`\`
-
-Use diretamente o contexto.
-
-## ActionSpec
-
-Operações de UI devem ser descritas por \`ActionSpec\` quando aplicável:
-
-- chave estável;
-- título;
-- \`OperationClass\`;
+- key;
+- title/category;
+- OperationClass;
+- RiskLevel;
+- impact;
 - timeout;
-- confirmação.
+- confirmation/destructive/reboot;
+- action_version;
+- idempotent;
+- retry_policy;
+- allowed_transports;
+- required_capabilities;
+- required_privilege;
+- disconnect_mode;
+- recovery timeout/delay;
+- rollback_strategy;
+- tags.
 
-Nunca derive semântica de segurança a partir do texto exibido ao operador.
+## Invariantes do registry
 
-## OperationClass
+O registry rejeita:
 
-- READ_ONLY;
-- HEAVY_READ;
-- LIGHT_WRITE;
-- HEAVY_WRITE;
-- DISRUPTIVE.
+- timeout <= 0;
+- lista de transporte vazia/inválida;
+- ação destrutiva sem confirmação;
+- SAFE_TRANSIENT em ação não idempotente;
+- TEMPORARY sem recovery timeout;
+- rollback handler sem estratégia documentada.
 
-O JobManager serializa qualquer classe diferente de READ_ONLY por host.
+Não desabilite essas validações para fazer catálogo carregar.
 
-## CommandResult
+## Retry
 
-Módulos retornam \`CommandResult\`.
+O ExecutionEngine não faz retry automático de mutações.
 
-Dados estruturados vão em \`data\`; texto nativo relevante pode ficar em \`stdout\`.
+O RemoteExecutor só faz fallback de mutação quando a falha é comprovadamente pré-execução.
 
-Não retorne tuplas ad-hoc.
+Nunca implemente loop genérico de retry ao redor de handler mutável.
 
-## Fallback
+## Preconditions
 
-### Leitura
+Use custom precondition quando a decisão depende do estado atual e não apenas de capability estática.
 
-Pode usar \`execute_powershell\`, \`execute_powershell_json\` ou \`execute_cmd\` com fallback de leitura.
+Precondition retorna PolicyCheck PASS/FAIL/WARN.
 
-### Mutação
+FAIL bloqueia handler.
 
-Use:
+## Disconnect
 
-- \`execute_mutating_powershell\`;
-- \`execute_mutating_powershell_json\`;
-- \`execute_mutating_cmd\`.
+Use TEMPORARY para operações que derrubam conexão e devem voltar.
 
-Esses caminhos impedem dupla execução quando a entrega ao host é incerta.
+Use TERMINAL quando o efeito final esperado é perder a estação, como shutdown.
 
-## Resultado indeterminado
+## Rollback
 
-Ao adicionar mutação, trate \`CommandResult.indeterminate\`.
+Rollback deve usar a evidência before original.
 
-Não converta resultado indeterminado em sucesso só porque uma chamada local terminou sem exceção.
+Requisitos:
 
-## PowerShell
+- inversa real;
+- parâmetros originais;
+- postcheck;
+- rollback validator;
+- auditoria.
 
-Preferir objetos estruturados e \`ConvertTo-Json\`.
+Não adicione rollback “best effort” sem prova de estado.
 
-Evitar parsing textual quando existe cmdlet estruturado.
+## Seletores
 
-Entradas interpoladas devem usar validadores/quoting centralizados.
+Use SelectorKind para parâmetros que podem ser inventariados.
 
-Para programas externos, verifique \`$LASTEXITCODE\` quando o exit code fizer parte do contrato.
+Não faça módulo chamar `input()`. A UI resolve seleção.
 
-## Remediação
+## Configuração corporativa
 
-Remediação deve separar:
+Nova allowlist deve:
 
-1. probe anterior;
-2. ação;
-3. probe posterior;
-4. validador;
-5. persistência.
-
-Validador deve devolver PASS, FAIL ou UNKNOWN.
-
-UNKNOWN é obrigatório quando o estado final não pode ser provado.
-
-## Avaliação
-
-Use \`core/evaluation.py\` para compliance/health compartilhado.
-
-Semântica:
-
-- PASS: evidência confirma conformidade;
-- FAIL: evidência confirma desvio;
-- UNKNOWN: métrica ausente;
-- NOT_APPLICABLE: controle desabilitado/não exigido.
-
-Não use \`bool(None)\` para transformar métrica ausente em falha.
+- ter schema/validador de bootstrap;
+- desabilitar apenas entrada inválida;
+- nunca aceitar segredo no repositório;
+- ter teste de entrada malformada.
 
 ## Banco
 
-Mudança de schema exige nova migration e incremento de \`SCHEMA_VERSION\`.
+Mudança de schema:
 
-Não altere estrutura existente “in place” sem migration.
+1. incrementar SCHEMA_VERSION;
+2. criar migration sequencial;
+3. manter upgrade de bancos anteriores;
+4. atualizar retention;
+5. adicionar teste.
 
-Adicione teste que cria banco antigo/novo quando a mudança afetar compatibilidade.
+Schema atual: 4.
 
-## Logging
+## Logging/auditoria
 
-Logs devem ser compactos por padrão. Não persista comandos/payloads completos sem necessidade.
+Persistência operacional deve usar redaction.
 
-Qualquer novo campo potencialmente sensível deve passar pelo mecanismo de redaction.
+Não persista comando bruto ou segredo apenas por conveniência.
 
-## Testes locais
+## Testes
 
-\`\`\`powershell
+```powershell
 python -W error::SyntaxWarning -m compileall -q .
-python -m pytest -q
-\`\`\`
-
-Para reproduzir gates adicionais:
-
-\`\`\`powershell
 python -m ruff check .
-python -m mypy --explicit-package-bases core/result.py core/context.py core/actions.py core/evaluation.py core/updater.py core/validation.py remediation/engine.py
-\`\`\`
+python -m pytest -q
+```
 
-## CI
-
-O workflow oficial executa:
-
-- Python 3.10/3.12/3.13 em Windows;
-- compile com SyntaxWarning como erro;
-- Ruff;
-- mypy em contratos críticos;
-- pytest;
-- coverage mínimo;
-- PyInstaller;
-- Inno Setup.
-
-Não reduza um gate para “fazer o CI passar” quando o gate encontrou defeito real. Corrija o contrato ou justifique explicitamente a exceção.
-
-## Checklist de PR
-
-\`\`\`text
-[ ] branch parte do master atual
-[ ] entrada validada
-[ ] operação classificada
-[ ] mutação usa executor mutável
-[ ] timeout definido
-[ ] resultado indeterminado tratado
-[ ] CommandResult preservado
-[ ] dados estruturados quando possível
-[ ] logging seguro
-[ ] migration criada se schema mudou
-[ ] testes adicionados
-[ ] matriz/ruff/mypy/coverage verdes
-[ ] build e instalador verdes
-[ ] docs atualizadas
-[ ] nenhum segredo no diff
-\`\`\`
+O CI executa mypy e coverage nos contratos endurecidos.
 
 ## Definition of Done
 
-\`\`\`text
-funciona
-+ falha previsivelmente
-+ não duplica mutação
-+ mantém feedback
-+ valida o resultado
-+ deixa evidência
-+ passa CI
-+ está documentado
-\`\`\`
+```text
+contrato tipado
++ policy/preconditions
++ execução segura
++ postcheck
++ UNKNOWN quando evidência é insuficiente
++ rollback apenas quando real
++ auditoria redigida
++ teste de happy path
++ teste de falha
++ CI verde
++ documentação
+```
