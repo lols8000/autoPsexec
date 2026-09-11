@@ -94,6 +94,7 @@ class ExecutionAction:
     operation_class: OperationClass
     risk: RiskLevel
     impact: str
+    timeout_seconds: int = 600
     requires_confirmation: bool = True
     requires_reboot: bool = False
     may_break_connectivity: bool = False
