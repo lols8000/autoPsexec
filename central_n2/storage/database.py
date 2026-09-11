@@ -8,6 +8,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from core.redaction import redact
+
 from .diff import diff_values
 
 
@@ -378,7 +380,7 @@ class CentralDatabase:
                     created_at,
                     state,
                     label,
-                    self._encode(payload),
+                    self._encode(redact(payload)),
                     correlation_id,
                 ),
             )
