@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Any
 
 from core.jobs import OperationClass
+from core.redaction import redact
 from core.result import CommandResult
 from remediation import RemediationResult
 
@@ -179,6 +180,7 @@ class ExecutionRecord:
     recovery: Any = None
     rollback_available: bool = False
     rollback_result: CommandResult | None = None
+    execution_id: int | None = None
 
     @property
     def public_parameters(self) -> dict[str, Any]:
@@ -190,6 +192,72 @@ class ExecutionRecord:
         return {
             key: "***" if key in sensitive else value
             for key, value in self.parameters.items()
+        }
+
+
+    def audit_payload(self) -> dict[str, Any]:
+        command = self.remediation.command_result
+        checks = []
+        for item in getattr(self.policy, "checks", []):
+            checks.append(
+                {
+                    "key": item.key,
+                    "state": item.state.value,
+                    "message": item.message,
+                    "evidence": redact(item.evidence),
+                }
+            )
+
+        recovery = None
+        if self.recovery is not None:
+            recovery = {
+                "attempted": self.recovery.attempted,
+                "ready": self.recovery.ready,
+                "attempts": self.recovery.attempts,
+                "elapsed_seconds": self.recovery.elapsed_seconds,
+                "transport": self.recovery.transport,
+                "state": self.recovery.state,
+                "error": redact(self.recovery.error),
+            }
+
+        return {
+            "action": {
+                "key": self.action.key,
+                "version": self.action.action_version,
+                "title": self.action.title,
+                "category": self.action.category,
+                "risk": self.action.risk.value,
+                "operation_class": self.action.operation_class.value,
+                "disconnect_mode": self.action.disconnect_mode.value,
+                "rollback_strategy": self.action.rollback_strategy,
+            },
+            "parameters": redact(self.public_parameters),
+            "policy": {
+                "allowed": bool(getattr(self.policy, "allowed", False)),
+                "checks": checks,
+            },
+            "command": {
+                "success": command.success,
+                "transport": command.transport,
+                "return_code": command.return_code,
+                "duration_ms": command.duration_ms,
+                "indeterminate": command.indeterminate,
+                "error": redact(command.stderr),
+                "data": redact(command.data),
+            },
+            "before": redact(self.remediation.before),
+            "after": redact(self.remediation.after),
+            "validation": {
+                "status": self.remediation.validation.status.value,
+                "message": self.remediation.validation.message,
+                "evidence": redact(self.remediation.validation.evidence),
+            },
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "duration_ms": self.duration_ms,
+            "operator": self.operator,
+            "recovery": recovery,
+            "rollback_available": self.rollback_available,
         }
 
 
