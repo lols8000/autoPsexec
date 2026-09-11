@@ -7,6 +7,7 @@ from core.result import CommandResult
 from remediation import ValidationResult
 
 from .models import ExecutionAction
+from .policy import CustomPrecondition
 
 
 Handler = Callable[[str, dict[str, Any]], CommandResult]
@@ -14,6 +15,10 @@ Probe = Callable[[str, dict[str, Any]], Any]
 Validator = Callable[
     [Any, CommandResult, Any, dict[str, Any]],
     ValidationResult,
+]
+RollbackHandler = Callable[
+    [str, dict[str, Any], Any],
+    CommandResult,
 ]
 
 
@@ -24,6 +29,9 @@ class BoundExecutionAction:
     before_probe: Probe | None = None
     after_probe: Probe | None = None
     validator: Validator | None = None
+    preconditions: tuple[CustomPrecondition, ...] = ()
+    rollback_handler: RollbackHandler | None = None
+    rollback_validator: Validator | None = None
 
 
 class ActionRegistry:
@@ -66,6 +74,25 @@ class ActionRegistry:
             item
             for item in self.all()
             if item.spec.category == category
+        ]
+
+    def search(self, query: str) -> list[BoundExecutionAction]:
+        normalized = query.strip().casefold()
+        if not normalized:
+            return self.all()
+        return [
+            item
+            for item in self.all()
+            if normalized
+            in " ".join(
+                (
+                    item.spec.key,
+                    item.spec.title,
+                    item.spec.category_label,
+                    item.spec.description,
+                    " ".join(item.spec.tags),
+                )
+            ).casefold()
         ]
 
     def __len__(self) -> int:
