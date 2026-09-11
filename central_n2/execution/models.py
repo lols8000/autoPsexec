@@ -256,7 +256,14 @@ class ExecutionRecord:
                 "operation_class": self.action.operation_class.value,
                 "disconnect_mode": self.action.disconnect_mode.value,
                 "retry_policy": self.action.retry_policy.value,
+                "retry_attempts": self.action.retry_attempts,
+                "retry_delay_seconds": self.action.retry_delay_seconds,
                 "idempotent": self.action.idempotent,
+                "allowed_transports": list(self.action.allowed_transports),
+                "required_capabilities": list(
+                    self.action.required_capabilities
+                ),
+                "required_privilege": self.action.required_privilege.value,
                 "rollback_strategy": self.action.rollback_strategy,
             },
             "parameters": redact(self.public_parameters),
