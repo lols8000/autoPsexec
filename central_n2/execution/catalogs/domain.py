@@ -5,7 +5,12 @@ from remediation import validate_gpupdate
 
 from ..models import ExecutionAction, RiskLevel
 from ..validators import command_field_true, service_running
-from .common import ExecutionDependencies, _register, _secure_channel, _wrap_three_arg
+from .common import (
+    ExecutionDependencies,
+    _register,
+    _secure_channel,
+    _wrap_three_arg,
+)
 
 
 def register(registry, deps: ExecutionDependencies) -> None:
@@ -21,6 +26,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.LOW,
             "Políticas podem alterar configuração da estação.",
             420,
+            required_capabilities=("DomainMember",),
+            tags=("domínio", "gpo", "gpupdate"),
         ),
         lambda host, p: deps.domain.gpupdate(host),
         after_probe=lambda host, p: deps.domain.gpresult(host),
@@ -38,6 +45,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.HIGH,
             "Altera relação segura da estação com o domínio.",
             300,
+            required_capabilities=("DomainMember",),
+            tags=("domínio", "secure channel", "repair"),
         ),
         lambda host, p: deps.domain.repair_secure_channel(host),
         before_probe=lambda host, p: deps.domain.status(host),
@@ -56,6 +65,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.LOW,
             "Baixo impacto.",
             180,
+            required_capabilities=("W32Time",),
+            tags=("horário", "w32time", "restart"),
         ),
         lambda host, p: deps.domain.restart_time_service(host),
         after_probe=lambda host, p: deps.system.service_status(
@@ -76,6 +87,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.MEDIUM,
             "Pode ajustar o relógio da estação.",
             240,
+            required_capabilities=("W32Time",),
+            tags=("horário", "w32time", "resync"),
         ),
         lambda host, p: deps.domain.resync_time(host),
         validator=command_field_true(
@@ -97,6 +110,8 @@ def register(registry, deps: ExecutionDependencies) -> None:
             "Tickets serão renovados; pode afetar autenticação momentaneamente.",
             180,
             destructive=True,
+            required_capabilities=("DomainMember", "Klist"),
+            tags=("domínio", "kerberos", "klist", "purge"),
         ),
         lambda host, p: deps.domain.purge_system_kerberos(host),
         validator=command_field_true(
