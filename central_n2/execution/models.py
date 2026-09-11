@@ -136,6 +136,8 @@ class ExecutionAction:
     action_version: int = 1
     idempotent: bool = False
     retry_policy: RetryPolicy = RetryPolicy.PRE_EXECUTION_ONLY
+    retry_attempts: int = 2
+    retry_delay_seconds: float = 0.75
     allowed_transports: tuple[str, ...] = (
         "local",
         "winrm",
