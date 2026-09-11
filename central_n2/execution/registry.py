@@ -68,6 +68,15 @@ class ActionRegistry:
                 f"Ação {spec.key}: ação destrutiva exige confirmação."
             )
 
+        if spec.retry_attempts < 1:
+            raise ValueError(
+                f"Ação {spec.key}: retry_attempts deve ser >= 1."
+            )
+        if spec.retry_delay_seconds < 0:
+            raise ValueError(
+                f"Ação {spec.key}: retry_delay_seconds deve ser >= 0."
+            )
+
         if (
             spec.retry_policy is RetryPolicy.SAFE_TRANSIENT
             and not spec.idempotent
