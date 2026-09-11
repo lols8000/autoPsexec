@@ -135,7 +135,7 @@ class ExecutionAction:
     recommendation: str | None = None
     action_version: int = 1
     idempotent: bool = False
-    retry_policy: RetryPolicy = RetryPolicy.NEVER
+    retry_policy: RetryPolicy = RetryPolicy.PRE_EXECUTION_ONLY
     allowed_transports: tuple[str, ...] = (
         "local",
         "winrm",
