@@ -28,6 +28,19 @@ class CertificatesModule:
     def keys(self) -> tuple[str, ...]:
         return tuple(sorted(self.catalog))
 
+    def _copy_destination(
+        self,
+        host: str,
+        remote_path: str,
+    ) -> str:
+        is_local = getattr(self.executor, "is_local", None)
+        if callable(is_local) and is_local(host):
+            path = PureWindowsPath(remote_path)
+            if not path.drive:
+                raise ValueError("remote_path deve ser absoluto.")
+            return str(path)
+        return self._admin_destination(host, remote_path)
+
     @staticmethod
     def _admin_destination(host: str, remote_path: str) -> str:
         path = PureWindowsPath(remote_path)
@@ -72,7 +85,7 @@ class CertificatesModule:
             or rf"C:\CentralN2\Certificates\{source.name}"
         )
         try:
-            destination = self._admin_destination(host, remote_path)
+            destination = self._copy_destination(host, remote_path)
             Path(destination).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
         except (OSError, ValueError) as exc:
