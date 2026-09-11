@@ -12,7 +12,7 @@ from .diff import diff_values
 
 
 class CentralDatabase:
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -82,6 +82,9 @@ class CentralDatabase:
             if version < 3:
                 self._migration_3(connection)
                 version = 3
+            if version < 4:
+                self._migration_4(connection)
+                version = 4
             connection.execute(f"PRAGMA user_version={version}")
 
             if version != self.SCHEMA_VERSION:
@@ -208,6 +211,43 @@ class CentralDatabase:
                 ON executions(correlation_id);
             CREATE INDEX IF NOT EXISTS idx_executions_action
                 ON executions(action);
+            """
+        )
+
+    @classmethod
+    def _migration_4(cls, connection: sqlite3.Connection) -> None:
+        columns = {
+            "operator": "TEXT",
+            "action_version": "INTEGER",
+            "transport": "TEXT",
+            "started_at": "TEXT",
+            "finished_at": "TEXT",
+            "duration_ms": "INTEGER",
+            "risk": "TEXT",
+            "parameters": "TEXT",
+            "rollback_available": "INTEGER",
+            "rollback_of": "INTEGER",
+            "is_rollback": "INTEGER DEFAULT 0",
+        }
+        for name, definition in columns.items():
+            if not cls._column_exists(
+                connection,
+                "executions",
+                name,
+            ):
+                connection.execute(
+                    f"ALTER TABLE executions "
+                    f"ADD COLUMN {name} {definition}"
+                )
+
+        connection.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_executions_operator
+                ON executions(operator);
+            CREATE INDEX IF NOT EXISTS idx_executions_transport
+                ON executions(transport);
+            CREATE INDEX IF NOT EXISTS idx_executions_rollback_of
+                ON executions(rollback_of);
             """
         )
 
@@ -488,6 +528,117 @@ class CentralDatabase:
                 ),
             )
 
+    def save_execution_record(
+        self,
+        record: Any,
+        *,
+        correlation_id: str | None = None,
+    ) -> int:
+        command = record.remediation.command_result
+        validation = record.remediation.validation
+        now = record.finished_at or datetime.now(timezone.utc).isoformat()
+
+        with self._connect() as connection:
+            self._touch_host(connection, record.host, now)
+            cursor = connection.execute(
+                """
+                INSERT INTO executions(
+                    host,created_at,action,validation_state,payload,correlation_id,
+                    operator,action_version,transport,started_at,finished_at,
+                    duration_ms,risk,parameters,rollback_available,rollback_of,
+                    is_rollback
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    record.host,
+                    now,
+                    record.action.key,
+                    validation.status.value,
+                    self._encode(record.audit_payload()),
+                    correlation_id,
+                    record.operator,
+                    record.action.action_version,
+                    command.transport,
+                    record.started_at,
+                    record.finished_at,
+                    record.duration_ms,
+                    record.action.risk.value,
+                    self._encode(record.public_parameters),
+                    int(record.rollback_available),
+                    None,
+                    0,
+                ),
+            )
+            execution_id = int(cursor.lastrowid)
+
+        record.execution_id = execution_id
+        return execution_id
+
+    def save_rollback_record(
+        self,
+        rollback: Any,
+        *,
+        original_execution_id: int,
+        operator: str | None = None,
+        correlation_id: str | None = None,
+    ) -> int:
+        now = rollback.finished_at or datetime.now(timezone.utc).isoformat()
+        validation = rollback.validation
+        result = rollback.result
+        payload = {
+            "action_key": rollback.action_key,
+            "result": {
+                "success": result.success,
+                "transport": result.transport,
+                "return_code": result.return_code,
+                "duration_ms": result.duration_ms,
+                "indeterminate": result.indeterminate,
+                "error": result.stderr,
+                "data": result.data,
+            },
+            "validation": {
+                "status": validation.status.value,
+                "message": validation.message,
+                "evidence": validation.evidence,
+            },
+            "started_at": rollback.started_at,
+            "finished_at": rollback.finished_at,
+            "duration_ms": rollback.duration_ms,
+        }
+
+        with self._connect() as connection:
+            self._touch_host(connection, rollback.host, now)
+            cursor = connection.execute(
+                """
+                INSERT INTO executions(
+                    host,created_at,action,validation_state,payload,correlation_id,
+                    operator,action_version,transport,started_at,finished_at,
+                    duration_ms,risk,parameters,rollback_available,rollback_of,
+                    is_rollback
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    rollback.host,
+                    now,
+                    f"rollback:{rollback.action_key}",
+                    validation.status.value,
+                    self._encode(payload),
+                    correlation_id,
+                    operator,
+                    1,
+                    result.transport,
+                    rollback.started_at,
+                    rollback.finished_at,
+                    rollback.duration_ms,
+                    "ROLLBACK",
+                    self._encode({}),
+                    0,
+                    original_execution_id,
+                    1,
+                ),
+            )
+            return int(cursor.lastrowid)
+
     def recent_executions(
         self,
         host: str,
@@ -498,7 +649,10 @@ class CentralDatabase:
             rows = connection.execute(
                 """
                 SELECT
-                    id,host,created_at,action,validation_state,payload,correlation_id
+                    id,host,created_at,action,validation_state,payload,correlation_id,
+                    operator,action_version,transport,started_at,finished_at,
+                    duration_ms,risk,parameters,rollback_available,rollback_of,
+                    is_rollback
                 FROM executions
                 WHERE lower(host)=lower(?)
                 ORDER BY id DESC
