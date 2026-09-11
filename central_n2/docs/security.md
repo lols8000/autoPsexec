@@ -76,6 +76,19 @@ Rollback só é oferecido quando:
 
 A Central não simula rollback para ações irreversíveis. Preconditions da reversão são independentes das preconditions da ida, evitando overwrite ou restauração sobre estado novo inesperado.
 
+O atendimento mantém uma pilha LIFO de execuções reversíveis. Uma ação não reversível posterior não apaga a possibilidade de desfazer a reversível anterior; o rollback sempre atua primeiro sobre a reversível mais recente.
+
+## Operações de arquivo
+
+A Central não aceita qualquer caminho absoluto como alvo de mutação.
+
+`execution.file_roots` limita as operações de arquivo a raízes explícitas. Defaults:
+
+- `C:\CentralN2`;
+- `C:\Temp`.
+
+Traversal com `..` é bloqueado antes de montar o PowerShell. Origem e destino de move precisam permanecer dentro das raízes autorizadas.
+
 ## Allowlist corporativa
 
 `packages`, `certificates` e `registry_actions` são validados no bootstrap.
