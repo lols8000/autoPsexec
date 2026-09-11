@@ -20,6 +20,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
             RiskLevel.MEDIUM,
             "Remove somente áreas temporárias previstas.",
             600,
+            tags=("disco", "limpeza", "temp", "cleanup"),
         ),
         lambda host, p: deps.disk.cleanup_safe(host),
         before_probe=lambda host, p: deps.disk.cleanup_estimate(host),
