@@ -806,7 +806,7 @@ def build_execution_registry(
             "Adicionar impressora compartilhada",
             "printers",
             "Impressão",
-            "Adiciona conexão \\servidor\fila.",
+            r"Adiciona conexão \\\\servidor\\fila.",
             OperationClass.LIGHT_WRITE,
             RiskLevel.MEDIUM,
             "Adiciona impressora ao sistema.",
@@ -1133,6 +1133,10 @@ def build_execution_registry(
             180,
         ),
         lambda host, p: deps.domain.restart_time_service(host),
+        after_probe=lambda host, p: deps.system.service_status(
+            host,
+            "w32time",
+        ),
         validator=service_running,
     )
     _register(
@@ -1235,7 +1239,7 @@ def build_execution_registry(
             host,
             p["sid"],
         ),
-        validator=command_completed,
+        validator=_wrap_three_arg(validate_cleanup),
     )
     _register(
         registry,
