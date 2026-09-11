@@ -129,6 +129,22 @@ def _validate_startup_rollback(
     )
 
 
+def _service_rollback_handler(deps: ExecutionDependencies):
+    def handler(
+        host: str,
+        parameters: dict[str, Any],
+        before: Any,
+    ) -> CommandResult:
+        return _rollback_service(
+            deps,
+            host,
+            parameters,
+            before,
+        )
+
+    return handler
+
+
 def register(registry, deps: ExecutionDependencies) -> None:
     service_name = (
         ExecutionParameter(
@@ -149,14 +165,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
         rollback_validator = None
         rollback_strategy = None
         if method in {"start", "stop"}:
-            rollback_handler = (
-                lambda host, p, before, d=deps: _rollback_service(
-                    d,
-                    host,
-                    p,
-                    before,
-                )
-            )
+            rollback_handler = _service_rollback_handler(deps)
             rollback_validator = _validate_service_rollback
             rollback_strategy = "Restaurar o estado Running/Stopped observado antes da ação."
 
