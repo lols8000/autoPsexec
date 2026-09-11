@@ -109,7 +109,7 @@ def test_version_is_consistent_across_runtime_package_and_installer():
     installer = (root / "installer" / "CentralN2.iss").read_text(encoding="utf-8")
     version_info = (root / "version_info.txt").read_text(encoding="utf-8")
 
-    expected = "5.1.0"
+    expected = "5.2.0"
     assert f'__version__ = "{expected}"' in runtime_text
     assert version_file == expected
     assert f'version = "{expected}"' in pyproject
