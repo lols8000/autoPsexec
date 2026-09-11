@@ -6,7 +6,7 @@ from typing import Any, Callable
 from core.result import CommandResult
 from remediation import ValidationResult
 
-from .models import ExecutionAction
+from .models import DisconnectMode, ExecutionAction, RetryPolicy
 from .policy import CustomPrecondition
 
 
@@ -38,10 +38,64 @@ class ActionRegistry:
     def __init__(self) -> None:
         self._actions: dict[str, BoundExecutionAction] = {}
 
+    @staticmethod
+    def _validate_contract(action: BoundExecutionAction) -> None:
+        spec = action.spec
+
+        if spec.timeout_seconds <= 0:
+            raise ValueError(
+                f"Ação {spec.key}: timeout_seconds deve ser > 0."
+            )
+        if not spec.allowed_transports:
+            raise ValueError(
+                f"Ação {spec.key}: informe ao menos um transporte."
+            )
+
+        allowed = {"local", "winrm", "psexec"}
+        invalid = {
+            item.casefold()
+            for item in spec.allowed_transports
+        } - allowed
+        if invalid:
+            raise ValueError(
+                f"Ação {spec.key}: transporte(s) inválido(s): "
+                + ", ".join(sorted(invalid))
+            )
+
+        if spec.destructive and not spec.requires_confirmation:
+            raise ValueError(
+                f"Ação {spec.key}: ação destrutiva exige confirmação."
+            )
+
+        if (
+            spec.retry_policy is RetryPolicy.SAFE_TRANSIENT
+            and not spec.idempotent
+        ):
+            raise ValueError(
+                f"Ação {spec.key}: SAFE_TRANSIENT exige idempotência."
+            )
+
+        if (
+            spec.disconnect_mode is DisconnectMode.TEMPORARY
+            and spec.recovery_timeout_seconds <= 0
+        ):
+            raise ValueError(
+                f"Ação {spec.key}: recovery_timeout_seconds deve ser > 0."
+            )
+
+        if (
+            action.rollback_handler is not None
+            and not spec.rollback_strategy
+        ):
+            raise ValueError(
+                f"Ação {spec.key}: rollback handler exige estratégia documentada."
+            )
+
     def register(self, action: BoundExecutionAction) -> None:
         key = action.spec.key
         if key in self._actions:
             raise ValueError(f"Ação duplicada no catálogo: {key}")
+        self._validate_contract(action)
         self._actions[key] = action
 
     def get(self, key: str) -> BoundExecutionAction:
