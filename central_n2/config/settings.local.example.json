@@ -31,8 +31,9 @@
   },
   "registry_actions": {
     "exemplo_hklm": {
+      "label": "Exemplo de política homologada",
+      "path": "HKLM:\\SOFTWARE\\Empresa\\Produto",
       "name": "Enabled",
-      "path": "HKLM:\\\\SOFTWARE\\\\Empresa\\\\Produto",
       "type": "DWord",
       "value": 1,
       "mode": "set"
