@@ -26,6 +26,11 @@ class CatalogValidationReport:
 
 _ALLOWED_PACKAGE_TYPES = {"msi", "exe", "cmd", "bat"}
 _ALLOWED_CERTIFICATE_STORES = {"Root", "CA", "My", "TrustedPeople"}
+_DEFAULT_FILE_ROOTS = (
+    r"C:\CentralN2",
+    r"C:\Temp",
+)
+
 _ALLOWED_REGISTRY_TYPES = {
     "String",
     "ExpandString",
@@ -219,6 +224,79 @@ def _validate_registry_actions(
     return valid
 
 
+def _validate_file_roots(
+    execution: Any,
+    issues: list[CatalogIssue],
+) -> dict[str, Any]:
+    if execution is None:
+        execution = {}
+    if not isinstance(execution, dict):
+        issues.append(
+            CatalogIssue(
+                "execution",
+                "*",
+                "execution deve ser um objeto.",
+            )
+        )
+        execution = {}
+
+    sanitized = dict(execution)
+    source = execution.get("file_roots", _DEFAULT_FILE_ROOTS)
+
+    if not isinstance(source, (list, tuple)):
+        issues.append(
+            CatalogIssue(
+                "execution.file_roots",
+                "*",
+                "file_roots deve ser uma lista de caminhos absolutos.",
+            )
+        )
+        source = _DEFAULT_FILE_ROOTS
+
+    valid: list[str] = []
+    for index, value in enumerate(source):
+        text = str(value).strip()
+        try:
+            candidate = PureWindowsPath(text)
+        except (TypeError, ValueError):
+            candidate = None
+
+        if (
+            not text
+            or candidate is None
+            or not candidate.drive
+            or ".." in candidate.parts
+        ):
+            issues.append(
+                CatalogIssue(
+                    "execution.file_roots",
+                    str(index),
+                    "Raiz deve ser caminho absoluto do Windows e não pode conter '..'.",
+                )
+            )
+            continue
+
+        normalized = str(candidate)
+        if normalized.casefold() not in {
+            item.casefold()
+            for item in valid
+        }:
+            valid.append(normalized)
+
+    if not valid:
+        valid = list(_DEFAULT_FILE_ROOTS)
+        issues.append(
+            CatalogIssue(
+                "execution.file_roots",
+                "*",
+                "Nenhuma raiz válida; defaults seguros foram restaurados.",
+            )
+        )
+
+    sanitized["file_roots"] = valid
+    return sanitized
+
+
 def validate_execution_configuration(
     settings: dict[str, Any],
 ) -> CatalogValidationReport:
@@ -237,6 +315,10 @@ def validate_execution_configuration(
         sanitized.get("registry_actions"),
         issues,
     )
+    sanitized["execution"] = _validate_file_roots(
+        sanitized.get("execution"),
+        issues,
+    )
 
     counts = {
         section: len(sanitized.get(section, {}))
@@ -246,6 +328,9 @@ def validate_execution_configuration(
             "registry_actions",
         )
     }
+    counts["file_roots"] = len(
+        sanitized.get("execution", {}).get("file_roots", [])
+    )
 
     sanitized["_execution_catalog_validation"] = {
         "issues": [
