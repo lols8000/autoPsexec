@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Any, Callable
 
 from core.result import CommandResult
@@ -19,6 +19,7 @@ from .models import (
     ExecutionRecord,
     ExecutionRollbackRecord,
     RecoveryResult,
+    RetryPolicy,
 )
 from .policy import (
     ExecutionPolicy,
@@ -58,6 +59,27 @@ def _bind_validator(
         return validator(before, command, after, parameters)
 
     return bound
+
+
+def _retryable_result(
+    result: CommandResult,
+    policy: RetryPolicy,
+) -> bool:
+    if result.success or result.indeterminate:
+        return False
+    if policy is RetryPolicy.NEVER:
+        return False
+
+    failure_kind = str(
+        result.metadata.get("transport_failure_kind") or ""
+    ).casefold()
+    if failure_kind == "pre_execution":
+        return True
+
+    return (
+        policy is RetryPolicy.SAFE_TRANSIENT
+        and result.metadata.get("retry_safe") is True
+    )
 
 
 class ExecutionEngine:
@@ -165,7 +187,38 @@ class ExecutionEngine:
 
         def action(target: str) -> CommandResult:
             nonlocal recovery
-            result = bound.handler(target, parsed)
+
+            max_attempts = (
+                1
+                if bound.spec.retry_policy is RetryPolicy.NEVER
+                else max(1, bound.spec.retry_attempts)
+            )
+            result: CommandResult | None = None
+            attempt = 0
+
+            for attempt in range(1, max_attempts + 1):
+                result = bound.handler(target, parsed)
+                result.metadata["execution_attempt"] = attempt
+                result.metadata["retry_policy"] = (
+                    bound.spec.retry_policy.value
+                )
+
+                if not _retryable_result(
+                    result,
+                    bound.spec.retry_policy,
+                ):
+                    break
+
+                if attempt < max_attempts:
+                    result.metadata["retry_scheduled"] = True
+                    if bound.spec.retry_delay_seconds > 0:
+                        sleep(
+                            bound.spec.retry_delay_seconds
+                            * attempt
+                        )
+
+            assert result is not None
+            result.metadata["execution_attempts"] = attempt
             result.metadata["execution_action"] = bound.spec.key
             result.metadata["action_version"] = bound.spec.action_version
             result.metadata["disconnect_mode"] = (
