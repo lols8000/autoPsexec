@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Any
 
 from core.jobs import OperationClass
+from core.result import CommandResult
 from remediation import RemediationResult
 
 
@@ -22,6 +23,29 @@ class ParameterKind(str, Enum):
     BOOLEAN = "BOOLEAN"
 
 
+class SelectorKind(str, Enum):
+    PROCESS = "PROCESS"
+    SERVICE = "SERVICE"
+    ADAPTER = "ADAPTER"
+    PRINTER = "PRINTER"
+    PROFILE = "PROFILE"
+    DEVICE = "DEVICE"
+    SESSION = "SESSION"
+
+
+class PrivilegeLevel(str, Enum):
+    ANY = "ANY"
+    ADMIN = "ADMIN"
+    SYSTEM = "SYSTEM"
+    USER_CONTEXT = "USER_CONTEXT"
+
+
+class DisconnectMode(str, Enum):
+    NONE = "NONE"
+    TEMPORARY = "TEMPORARY"
+    TERMINAL = "TERMINAL"
+
+
 @dataclass(frozen=True, slots=True)
 class ExecutionParameter:
     key: str
@@ -34,6 +58,7 @@ class ExecutionParameter:
     max_value: int | None = None
     sensitive: bool = False
     help_text: str | None = None
+    selector: SelectorKind | None = None
 
     def parse(self, raw: Any) -> Any:
         if raw is None or (isinstance(raw, str) and not raw.strip()):
@@ -101,6 +126,20 @@ class ExecutionAction:
     destructive: bool = False
     parameters: tuple[ExecutionParameter, ...] = ()
     recommendation: str | None = None
+    action_version: int = 1
+    idempotent: bool = False
+    allowed_transports: tuple[str, ...] = (
+        "local",
+        "winrm",
+        "psexec",
+    )
+    required_capabilities: tuple[str, ...] = ()
+    required_privilege: PrivilegeLevel = PrivilegeLevel.ADMIN
+    disconnect_mode: DisconnectMode = DisconnectMode.NONE
+    recovery_timeout_seconds: int = 180
+    recovery_delay_seconds: int = 3
+    rollback_strategy: str | None = None
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -109,6 +148,14 @@ class ExecutionRecord:
     host: str
     parameters: dict[str, Any]
     remediation: RemediationResult
+    policy: Any = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    duration_ms: int = 0
+    operator: str | None = None
+    recovery: Any = None
+    rollback_available: bool = False
+    rollback_result: CommandResult | None = None
 
     @property
     def public_parameters(self) -> dict[str, Any]:
@@ -121,3 +168,14 @@ class ExecutionRecord:
             key: "***" if key in sensitive else value
             for key, value in self.parameters.items()
         }
+
+
+@dataclass(slots=True)
+class ExecutionRollbackRecord:
+    action_key: str
+    host: str
+    result: CommandResult
+    validation: Any = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    duration_ms: int = 0
