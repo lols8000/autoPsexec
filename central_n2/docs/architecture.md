@@ -128,6 +128,7 @@ Contrato operacional:
 - action_version;
 - idempotent;
 - RetryPolicy;
+- retry_attempts / retry_delay_seconds;
 - allowed_transports;
 - required_capabilities;
 - required_privilege;
@@ -159,7 +160,15 @@ Nenhuma ação bloqueada chega ao handler.
 
 Padrão: `PRE_EXECUTION_ONLY`.
 
-O ExecutionEngine não executa retry automático cego. O executor continua sendo responsável por fallback seguro. `SAFE_TRANSIENT` é aceito apenas para ação idempotente.
+O ExecutionEngine executa retry **seletivo e limitado**:
+
+- `NEVER`: uma tentativa;
+- `PRE_EXECUTION_ONLY`: nova tentativa apenas quando o resultado informa `transport_failure_kind=pre_execution`;
+- `SAFE_TRANSIENT`: além da regra anterior, aceita falha explicitamente marcada como `retry_safe=true`.
+
+`retry_attempts` e `retry_delay_seconds` fazem parte do contrato. Resultado `indeterminate` nunca é repetido automaticamente.
+
+O fallback WinRM → PsExec continua sendo responsabilidade do RemoteExecutor; retry do engine não substitui nem enfraquece essa regra. `SAFE_TRANSIENT` é aceito apenas para ação idempotente.
 
 ### DisconnectMode
 
@@ -171,7 +180,9 @@ Em TEMPORARY, um comando indeterminado só pode terminar em PASS se a estação 
 
 ### Rollback
 
-`BoundExecutionAction` pode possuir `rollback_handler` e `rollback_validator`.
+`BoundExecutionAction` pode possuir `rollback_handler`, `rollback_validator` e `rollback_preconditions`.
+
+As preconditions do rollback são independentes das preconditions da ida. Isso evita bloquear uma reversão porque o estado esperado após a ação já não satisfaz a condição original.
 
 Rollback recebe:
 
@@ -249,13 +260,14 @@ Tabelas principais:
 
 - parâmetros sensíveis redigidos;
 - policy checks;
+- metadata operacional selecionada de retry/fallback;
 - transporte e return code;
 - before/after redigidos;
 - validation;
 - recovery;
 - rollback availability.
 
-O comando bruto não é necessário para a auditoria padrão.
+O comando bruto não é necessário para a auditoria padrão. O redactor também percorre dataclasses, evitando que segredos dentro de `CommandResult` escapem durante a serialização.
 
 ## Distribuição
 
