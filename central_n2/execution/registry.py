@@ -30,6 +30,7 @@ class BoundExecutionAction:
     after_probe: Probe | None = None
     validator: Validator | None = None
     preconditions: tuple[CustomPrecondition, ...] = ()
+    rollback_preconditions: tuple[CustomPrecondition, ...] = ()
     rollback_handler: RollbackHandler | None = None
     rollback_validator: Validator | None = None
 
