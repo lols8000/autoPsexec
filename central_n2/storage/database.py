@@ -676,6 +676,7 @@ class CentralDatabase:
             {
                 **dict(row),
                 "payload": json.loads(row["payload"]),
+                "parameters": json.loads(row["parameters"] or "{}"),
             }
             for row in rows
         ]
