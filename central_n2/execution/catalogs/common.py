@@ -10,6 +10,7 @@ from modules.disk import DiskModule
 from modules.domain import DomainModule
 from modules.file_ops import FileOperationsModule
 from modules.glpi import GLPIModule
+from modules.health import HealthModule
 from modules.network import NetworkModule
 from modules.packages import PackagesModule
 from modules.printers import PrintersModule
@@ -37,6 +38,7 @@ class ExecutionDependencies:
     users: UsersProfilesModule
     disk: DiskModule
     glpi: GLPIModule
+    health: HealthModule
     security: SecurityModule
     updates: UpdatesModule
     repair: RepairModule
