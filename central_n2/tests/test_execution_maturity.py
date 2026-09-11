@@ -935,3 +935,134 @@ def test_database_links_rollback_and_consumes_parent_availability(tmp_path: Path
     assert by_id[child_id]["rollback_of"] == parent_id
     assert by_id[child_id]["is_rollback"] == 1
     assert by_id[child_id]["validation_state"] == "PASS"
+
+
+
+def test_catalog_validation_sanitizes_file_roots():
+    report = validate_execution_configuration(
+        {
+            "execution": {
+                "file_roots": [
+                    r"C:\CentralN2",
+                    r"C:\CentralN2\..\Windows",
+                    "relative\\path",
+                ]
+            }
+        }
+    )
+
+    assert report.settings["execution"]["file_roots"] == [
+        r"C:\CentralN2"
+    ]
+    assert any(
+        issue.section == "execution.file_roots"
+        for issue in report.issues
+    )
+
+
+def test_catalog_validation_restores_default_file_roots_when_all_invalid():
+    report = validate_execution_configuration(
+        {
+            "execution": {
+                "file_roots": [
+                    "relative",
+                    r"C:\CentralN2\..\Windows",
+                ]
+            }
+        }
+    )
+
+    assert report.settings["execution"]["file_roots"] == [
+        r"C:\CentralN2",
+        r"C:\Temp",
+    ]
+
+
+def test_registry_rejects_rollback_strategy_without_handler():
+    registry = ActionRegistry()
+
+    try:
+        registry.register(
+            BoundExecutionAction(
+                spec=ExecutionAction(
+                    key="invalid.rollback",
+                    title="Invalid",
+                    category="test",
+                    category_label="Test",
+                    description="Test.",
+                    operation_class=OperationClass.LIGHT_WRITE,
+                    risk=RiskLevel.LOW,
+                    impact="None.",
+                    rollback_strategy="Desfazer.",
+                ),
+                handler=lambda host, params: CommandResult(
+                    True,
+                    "x",
+                    host,
+                ),
+            )
+        )
+    except ValueError as exc:
+        assert "estratégia de rollback exige handler" in str(exc)
+    else:
+        raise AssertionError("Contrato de rollback incompleto deveria falhar")
+
+
+def test_registry_rejects_temporary_disconnect_without_postcheck():
+    registry = ActionRegistry()
+
+    try:
+        registry.register(
+            BoundExecutionAction(
+                spec=ExecutionAction(
+                    key="invalid.disconnect",
+                    title="Invalid",
+                    category="test",
+                    category_label="Test",
+                    description="Test.",
+                    operation_class=OperationClass.DISRUPTIVE,
+                    risk=RiskLevel.HIGH,
+                    impact="Network.",
+                    disconnect_mode=DisconnectMode.TEMPORARY,
+                ),
+                handler=lambda host, params: CommandResult(
+                    True,
+                    "x",
+                    host,
+                ),
+            )
+        )
+    except ValueError as exc:
+        assert "TEMPORARY exige postcheck e validator" in str(exc)
+    else:
+        raise AssertionError("TEMPORARY incompleto deveria falhar")
+
+
+def test_registry_rejects_terminal_without_connectivity_impact():
+    registry = ActionRegistry()
+
+    try:
+        registry.register(
+            BoundExecutionAction(
+                spec=ExecutionAction(
+                    key="invalid.terminal",
+                    title="Invalid",
+                    category="test",
+                    category_label="Test",
+                    description="Test.",
+                    operation_class=OperationClass.DISRUPTIVE,
+                    risk=RiskLevel.HIGH,
+                    impact="Network.",
+                    disconnect_mode=DisconnectMode.TERMINAL,
+                ),
+                handler=lambda host, params: CommandResult(
+                    True,
+                    "x",
+                    host,
+                ),
+            )
+        )
+    except ValueError as exc:
+        assert "TERMINAL deve declarar may_break_connectivity" in str(exc)
+    else:
+        raise AssertionError("TERMINAL incoerente deveria falhar")
