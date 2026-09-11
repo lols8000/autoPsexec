@@ -1,11 +1,27 @@
 from .catalog import ExecutionDependencies, build_execution_registry
-from .engine import ExecutionEngine
+from .engine import (
+    ExecutionBlockedError,
+    ExecutionEngine,
+)
 from .models import (
+    DisconnectMode,
     ExecutionAction,
     ExecutionParameter,
+    ExecutionPlan,
     ExecutionRecord,
+    ExecutionRollbackRecord,
     ParameterKind,
+    PrivilegeLevel,
+    RecoveryResult,
     RiskLevel,
+    SelectorKind,
+)
+from .policy import (
+    ExecutionPolicy,
+    ExecutionPolicyContext,
+    ExecutionPolicyReport,
+    PolicyCheck,
+    PolicyState,
 )
 from .registry import (
     ActionRegistry,
@@ -20,17 +36,29 @@ from .validators import (
 
 __all__ = [
     "ActionRegistry",
-    "ExecutionDependencies",
     "BoundExecutionAction",
+    "DisconnectMode",
     "ExecutionAction",
+    "ExecutionBlockedError",
+    "ExecutionDependencies",
     "ExecutionEngine",
     "ExecutionParameter",
+    "ExecutionPlan",
+    "ExecutionPolicy",
+    "ExecutionPolicyContext",
+    "ExecutionPolicyReport",
     "ExecutionRecord",
+    "ExecutionRollbackRecord",
     "ParameterKind",
+    "PolicyCheck",
+    "PolicyState",
+    "PrivilegeLevel",
+    "RecoveryResult",
     "RiskLevel",
+    "SelectorKind",
+    "build_execution_registry",
     "command_completed",
     "field_equals",
     "service_running",
     "service_stopped",
-    "build_execution_registry",
 ]
