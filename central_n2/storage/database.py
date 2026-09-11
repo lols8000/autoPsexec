@@ -624,7 +624,7 @@ class CentralDatabase:
                     now,
                     f"rollback:{rollback.action_key}",
                     validation.status.value,
-                    self._encode(payload),
+                    self._encode(redact(payload)),
                     correlation_id,
                     operator,
                     1,
