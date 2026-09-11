@@ -525,7 +525,7 @@ class CentralDatabase:
                     now,
                     action,
                     validation_state,
-                    self._encode(payload),
+                    self._encode(redact(payload)),
                     correlation_id,
                 ),
             )
