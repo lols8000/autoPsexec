@@ -283,7 +283,7 @@ class ExecutionEngine:
             bound.spec,
             context,
             record.parameters,
-            custom_preconditions=bound.preconditions,
+            custom_preconditions=bound.rollback_preconditions,
         )
         if not report.allowed:
             failures = "; ".join(
