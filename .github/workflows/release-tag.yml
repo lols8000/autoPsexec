@@ -33,10 +33,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Require release credential
+        shell: bash
+        env:
+          CENTRAL_N2_RELEASE_TOKEN: ${{ secrets.CENTRAL_N2_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CENTRAL_N2_RELEASE_TOKEN" ]]; then
+            echo "::error::Secret CENTRAL_N2_RELEASE_TOKEN não configurado."
+            echo "::error::A promoção de tags que referenciam workflows exige credencial com Contents e Workflows em leitura/escrita."
+            exit 1
+          fi
+
       - name: Checkout release history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          token: ${{ secrets.CENTRAL_N2_RELEASE_TOKEN }}
 
       - name: Resolve requested tag
         shell: bash
