@@ -71,7 +71,8 @@ jobs:
           execution/models.py execution/policy.py execution/config_validation.py
           execution/registry.py execution/engine.py
           remediation/engine.py
-          validation/models.py validation/runner.py validation/cli.py
+          validation/models.py validation/config.py validation/reporting.py
+          validation/runner.py validation/cli.py
 
       - name: Run tests
         if: matrix.python-version != '3.12'
