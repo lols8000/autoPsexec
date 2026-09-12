@@ -24,12 +24,17 @@ class FakeSession:
             "state": "READY_WINRM" if ready else "NO_USABLE_TRANSPORT",
             "diagnosis": "ok" if ready else "sem transporte",
         }
-        self.capabilities = capabilities or {
-            "DomainMember": True,
-            "PrinterManagement": True,
-            "GLPI": True,
-            "WindowsUpdateCOM": True,
-        }
+        self.capabilities = (
+            capabilities
+            if capabilities is not None
+            else {
+                "DomainMember": True,
+                "PrinterManagement": True,
+                "GLPI": True,
+                "WindowsUpdateCOM": True,
+                "Battery": True,
+            }
+        )
         self.capability_error = None
         self._ready = ready
 
@@ -168,6 +173,7 @@ def test_profile_transport_mismatch_is_reported(tmp_path):
     assert profile_case.status is CaseStatus.FAIL
     assert "winrm" in profile_case.message
     assert "psexec" in profile_case.message
+    assert report.passed is False
 
 
 def test_optional_capability_cases_are_skipped(tmp_path):
@@ -177,6 +183,7 @@ def test_optional_capability_cases_are_skipped(tmp_path):
             "PrinterManagement": False,
             "GLPI": False,
             "WindowsUpdateCOM": False,
+            "Battery": False,
         }
     )
     runner = QualificationRunner(
@@ -195,6 +202,87 @@ def test_optional_capability_cases_are_skipped(tmp_path):
     assert "printers.inventory" in skipped
     assert "glpi.status" in skipped
     assert "updates.status" in skipped
+    assert report.passed is True
+
+
+def test_specialized_printer_profile_requires_printer_capability(tmp_path):
+    session = FakeSession(
+        capabilities={
+            "DomainMember": False,
+            "PrinterManagement": False,
+            "GLPI": False,
+            "WindowsUpdateCOM": False,
+            "Battery": False,
+        }
+    )
+    runner = QualificationRunner(FakeRuntime(session), output_dir=tmp_path)
+
+    report = runner.run("PC01", profile="printer")
+
+    assert report.passed is False
+    printer_case = next(
+        case for case in report.cases if case.key == "printers.inventory"
+    )
+    assert printer_case.status is CaseStatus.SKIP
+
+
+def test_specialized_glpi_profile_requires_glpi_capability(tmp_path):
+    session = FakeSession(
+        capabilities={
+            "DomainMember": True,
+            "PrinterManagement": True,
+            "GLPI": False,
+            "WindowsUpdateCOM": True,
+            "Battery": False,
+        }
+    )
+    runner = QualificationRunner(FakeRuntime(session), output_dir=tmp_path)
+
+    report = runner.run("PC01", profile="glpi")
+
+    assert report.passed is False
+
+
+def test_specialized_domain_profile_requires_domain_membership(tmp_path):
+    session = FakeSession(
+        capabilities={
+            "DomainMember": False,
+            "PrinterManagement": True,
+            "GLPI": True,
+            "WindowsUpdateCOM": True,
+            "Battery": False,
+        }
+    )
+    runner = QualificationRunner(FakeRuntime(session), output_dir=tmp_path)
+
+    report = runner.run("PC01", profile="domain")
+
+    assert report.passed is False
+
+
+def test_specialized_notebook_profile_requires_battery(tmp_path):
+    session = FakeSession(
+        capabilities={
+            "DomainMember": True,
+            "PrinterManagement": True,
+            "GLPI": True,
+            "WindowsUpdateCOM": True,
+            "Battery": False,
+        }
+    )
+    runner = QualificationRunner(FakeRuntime(session), output_dir=tmp_path)
+
+    report = runner.run("PC01", profile="notebook")
+
+    assert report.passed is False
+
+
+def test_specialized_notebook_profile_passes_with_battery(tmp_path):
+    runner = QualificationRunner(FakeRuntime(), output_dir=tmp_path)
+
+    report = runner.run("PC01", profile="notebook")
+
+    assert report.passed is True
 
 
 def test_no_transport_fails_connectivity_and_skips_probes(tmp_path):
