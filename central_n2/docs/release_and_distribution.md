@@ -116,7 +116,7 @@ CI do PR verde
   ↓
 merge com head SHA esperado
   ↓
-tag v5.1.0
+tag v5.2.0
   ↓
 workflow de release
   ↓
