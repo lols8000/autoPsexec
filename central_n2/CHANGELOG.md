@@ -1,5 +1,17 @@
 # Changelog
 
+## 5.2.0 — hardening pós-homologação
+
+- resultado JSON estruturado vazio ou inválido passa a ser `indeterminate`, evitando falso positivo de sucesso;
+- parser distingue JSON válido `null` de falha real de parse;
+- `CapabilityDetector` rejeita payload indeterminado ou com contrato inválido;
+- console mostra `⚠ INDETERMINADO` como estado primário, sem exibir `✓ SUCESSO` para o mesmo resultado;
+- runner de homologação preserva artefatos mesmo quando a abertura de sessão falha;
+- action key inexistente vira caso `FAIL` evidenciado, em vez de abortar o relatório;
+- evidências JSON/Markdown da homologação passam pelo redactor central;
+- nomes dos artefatos ganharam precisão de microssegundos para evitar colisões em reexecuções rápidas.
+
+
 ## 5.2.0 — 2026-09-11
 
 ### Central de Execuções

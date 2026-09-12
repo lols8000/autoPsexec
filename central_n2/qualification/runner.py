@@ -9,6 +9,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from core.redaction import redact, redact_text
 from core.result import CommandResult
 from core.version import __version__
 from execution import DisconnectMode, ExecutionBlockedError
@@ -51,7 +52,7 @@ def _command_evidence(result: CommandResult) -> dict[str, Any]:
         evidence["stderr"] = result.stderr[:2000]
     if result.stdout and result.data is None:
         evidence["stdout"] = result.stdout[:2000]
-    return evidence
+    return redact(evidence)
 
 
 class QualificationRunner:
@@ -197,7 +198,26 @@ class QualificationRunner:
         allow_disruptive: bool,
         confirmed_host: str | None,
     ) -> QualificationCaseResult:
-        bound = self.runtime.registry.get(action_key)
+        started_at = _utc_now()
+        started = perf_counter()
+        try:
+            bound = self.runtime.registry.get(action_key)
+        except KeyError:
+            case = QualificationCase(
+                key=f"action.{action_key}",
+                title=action_key,
+                category="Ação",
+                kind="action",
+            )
+            return self._case_result(
+                case,
+                status=CaseStatus.FAIL,
+                started_at=started_at,
+                started_clock=started,
+                transport=session.transport,
+                message=f"Ação de homologação não encontrada: {action_key}.",
+            )
+
         spec = bound.spec
         case = QualificationCase(
             key=f"action.{action_key}",
@@ -205,8 +225,6 @@ class QualificationRunner:
             category=f"Ação / {spec.category_label}",
             kind="action",
         )
-        started_at = _utc_now()
-        started = perf_counter()
 
         disruptive = (
             spec.may_break_connectivity
@@ -270,20 +288,26 @@ class QualificationRunner:
             ValidationStatus.UNKNOWN: CaseStatus.UNKNOWN,
         }.get(validation.status, CaseStatus.UNKNOWN)
 
-        evidence = {
-            "action": spec.key,
-            "risk": spec.risk.value,
-            "parameters": record.public_parameters,
-            "validation": {
-                "status": validation.status.value,
-                "message": validation.message,
-                "evidence": validation.evidence,
-            },
-            "transport": record.remediation.command_result.transport,
-            "duration_ms": record.duration_ms,
-            "recovery": asdict(record.recovery) if record.recovery else None,
-            "rollback_available": record.rollback_available,
-        }
+        evidence = redact(
+            {
+                "action": spec.key,
+                "risk": spec.risk.value,
+                "parameters": record.public_parameters,
+                "validation": {
+                    "status": validation.status.value,
+                    "message": validation.message,
+                    "evidence": validation.evidence,
+                },
+                "transport": record.remediation.command_result.transport,
+                "duration_ms": record.duration_ms,
+                "recovery": (
+                    asdict(record.recovery)
+                    if record.recovery
+                    else None
+                ),
+                "rollback_available": record.rollback_available,
+            }
+        )
         return self._case_result(
             case,
             status=status,
@@ -331,7 +355,7 @@ class QualificationRunner:
                 duration_ms=0,
                 message=f"{type(exc).__name__}: {exc}",
             )
-            return QualificationReport(
+            report = QualificationReport(
                 host=host,
                 profile=profile,
                 started_at=report_started,
@@ -343,6 +367,8 @@ class QualificationRunner:
                 operator=self.operator,
                 version=__version__,
             )
+            self.export(report)
+            return report
 
         cases: list[QualificationCaseResult] = []
         connectivity_case = BASELINE_CASES[0]
@@ -453,14 +479,15 @@ class QualificationRunner:
 
     def export(self, report: QualificationReport) -> tuple[Path, Path]:
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         base = f"qualification-{_safe_name(report.host)}-{stamp}"
         json_path = self.output_dir / f"{base}.json"
         md_path = self.output_dir / f"{base}.md"
 
+        payload = redact(asdict(report))
         json_path.write_text(
             json.dumps(
-                asdict(report),
+                payload,
                 indent=2,
                 ensure_ascii=False,
                 default=str,
@@ -491,7 +518,7 @@ class QualificationRunner:
             "|---|---|---|---|---:|---|",
         ]
         for case in report.cases:
-            message = case.message.replace("|", "\\|").replace("\n", " ")
+            message = redact_text(case.message).replace("|", "\\|").replace("\n", " ")
             lines.append(
                 f"| {case.status.value} | {case.title} | {case.category} | "
                 f"{case.transport or '-'} | {case.duration_ms} ms | {message} |"

@@ -238,6 +238,11 @@ PASS | FAIL | UNKNOWN
 
 UNKNOWN significa que o estado final não pôde ser comprovado.
 
+### Contrato de resultado estruturado
+
+Chamadas `execute_powershell_json` e `execute_mutating_powershell_json` exigem JSON válido quando o comando termina com sucesso. Saída vazia ou não parseável marca o `CommandResult` como `indeterminate`; JSON `null` continua sendo JSON válido. O `CapabilityDetector` rejeita payload indeterminado ou não-dicionário. A UI apresenta o terceiro estado como `⚠ INDETERMINADO`, sem rotulá-lo como sucesso.
+
+
 ## Persistência
 
 SQLite schema **4**.
