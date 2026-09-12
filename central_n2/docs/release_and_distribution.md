@@ -162,6 +162,8 @@ A criação de tags oficiais é separada da publicação da release.
 O workflow `.github/workflows/release-tag.yml`:
 
 - recebe uma tag SemVer e um commit já homologado;
+- usa a credencial dedicada `RELEASE_PROMOTION_TOKEN`, sem reutilizar o
+  `GITHUB_TOKEN` para escrever refs oficiais;
 - valida que o commit existe e é ancestral de `master`;
 - confirma que `VERSION`, `core/version.py`, `pyproject.toml`,
   `installer/CentralN2.iss` e `version_info.txt` correspondem à tag;
@@ -171,6 +173,18 @@ O workflow `.github/workflows/release-tag.yml`:
 
 Para a 5.2.0, o commit congelado é
 `da28161fb826abd418ef8491d45db8d4e15e5282`.
+
+### Credencial de promoção
+
+O secret de repositório `RELEASE_PROMOTION_TOKEN` deve ser uma credencial
+dedicada, de menor privilégio possível, autorizada apenas para este
+repositório. Ela precisa permitir escrita em **Contents** e em **Workflows**,
+porque o GitHub bloqueia a criação de uma ref de tag para commits que contêm
+alterações em `.github/workflows/` quando a credencial não possui a permissão
+de workflows.
+
+A credencial não deve ser reutilizada pela aplicação, não entra em
+`settings.local.json` e não é incluída nos artefatos de release.
 
 A publicação da release permanece uma etapa separada. O workflow
 `.github/workflows/central-n2-release.yml` aceita tanto evento de tag quanto
