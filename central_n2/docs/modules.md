@@ -160,6 +160,8 @@ Executa e inspeciona apenas RegistryAction homologada; suporta rollback do valor
 - move/rename;
 - remove file.
 
+Todas as mutações são confinadas a `execution.file_roots`; origem/destino fora das raízes ou com traversal são recusados antes do executor.
+
 Não oferece delete recursivo genérico.
 
 ## Catálogos de execução

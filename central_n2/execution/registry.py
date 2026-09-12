@@ -30,6 +30,7 @@ class BoundExecutionAction:
     after_probe: Probe | None = None
     validator: Validator | None = None
     preconditions: tuple[CustomPrecondition, ...] = ()
+    rollback_preconditions: tuple[CustomPrecondition, ...] = ()
     rollback_handler: RollbackHandler | None = None
     rollback_validator: Validator | None = None
 
@@ -67,6 +68,15 @@ class ActionRegistry:
                 f"Ação {spec.key}: ação destrutiva exige confirmação."
             )
 
+        if spec.retry_attempts < 1:
+            raise ValueError(
+                f"Ação {spec.key}: retry_attempts deve ser >= 1."
+            )
+        if spec.retry_delay_seconds < 0:
+            raise ValueError(
+                f"Ação {spec.key}: retry_delay_seconds deve ser >= 0."
+            )
+
         if (
             spec.retry_policy is RetryPolicy.SAFE_TRANSIENT
             and not spec.idempotent
@@ -89,6 +99,39 @@ class ActionRegistry:
         ):
             raise ValueError(
                 f"Ação {spec.key}: rollback handler exige estratégia documentada."
+            )
+
+        if (
+            spec.rollback_strategy
+            and action.rollback_handler is None
+        ):
+            raise ValueError(
+                f"Ação {spec.key}: estratégia de rollback exige handler."
+            )
+
+        if (
+            (
+                action.rollback_validator is not None
+                or action.rollback_preconditions
+            )
+            and action.rollback_handler is None
+        ):
+            raise ValueError(
+                f"Ação {spec.key}: validator/preconditions de rollback exigem handler."
+            )
+
+        if spec.disconnect_mode is DisconnectMode.TEMPORARY:
+            if action.after_probe is None or action.validator is None:
+                raise ValueError(
+                    f"Ação {spec.key}: TEMPORARY exige postcheck e validator."
+                )
+
+        if (
+            spec.disconnect_mode is DisconnectMode.TERMINAL
+            and not spec.may_break_connectivity
+        ):
+            raise ValueError(
+                f"Ação {spec.key}: TERMINAL deve declarar may_break_connectivity."
             )
 
     def register(self, action: BoundExecutionAction) -> None:

@@ -8,7 +8,8 @@
 - catálogo monolítico quebrado em 18 domínios sob `execution/catalogs/`;
 - `ExecutionAction` passou a declarar risco, timeout, idempotência, retry, transportes, privilege, capabilities, disconnect mode, rollback e tags;
 - registry valida invariantes de contrato antes de aceitar uma ação;
-- parâmetros podem usar seletores de processos, serviços, adaptadores, impressoras, perfis, PnP e sessões.
+- parâmetros podem usar seletores de processos, serviços, adaptadores, impressoras, perfis, PnP e sessões;
+- seletores de perfil/sessão passaram a usar inventários leves/estruturados, sem varredura recursiva ou parsing frágil de quser.
 
 ### Policy, recovery e segurança de mutação
 
@@ -16,7 +17,8 @@
 - ações incompatíveis são bloqueadas antes do handler;
 - `RetryPolicy` formalizada com NEVER, PRE_EXECUTION_ONLY e SAFE_TRANSIENT;
 - SAFE_TRANSIENT exige idempotência;
-- ExecutionEngine não faz retry cego de mutação;
+- ExecutionEngine aplica retry seletivo com retry_attempts/retry_delay_seconds apenas em falha pré-execução ou explicitamente retry-safe;
+- resultado indeterminado nunca entra em retry automático;
 - DisconnectMode NONE/TEMPORARY/TERMINAL;
 - DHCP renew, restart de NIC e reboot podem usar recovery e postcheck após reconexão;
 - resultado indeterminado continua preservado e só pode virar PASS após evidência pós-recovery suficiente.
@@ -27,7 +29,18 @@
 - rollback de RegistryAction homologada para valor/ausência anterior;
 - move/rename protegido pode retornar ao caminho original;
 - rollback possui confirmação reforçada, validador e registro próprio;
-- ações irreversíveis não recebem rollback fictício.
+- rollback_preconditions são independentes das preconditions da execução original;
+- file.move bloqueia rollback quando a origem original voltou a existir, evitando overwrite;
+- rollback PASS consome a disponibilidade de rollback do registro pai;
+- ações irreversíveis não recebem rollback fictício;
+- AttendanceContext mantém pilha LIFO de execuções reversíveis, preservando rollback mesmo após ações não reversíveis.
+
+### Escopo de arquivos
+
+- FileOperationsModule passou a exigir raízes autorizadas;
+- defaults seguros: C:\CentralN2 e C:\Temp;
+- traversal com .. e caminhos fora da allowlist são bloqueados antes do PowerShell;
+- execution.file_roots é validado/sanitizado no bootstrap.
 
 ### Catálogos corporativos
 
@@ -42,6 +55,8 @@
 - execution records armazenam operador, action_version, transporte, timestamps, duração, risco, parâmetros redigidos e correlation_id;
 - rollbacks são ligados à execução original por rollback_of/is_rollback;
 - `ExecutionRecord.audit_payload()` evita persistência de comando bruto e aplica redaction;
+- auditoria persiste somente metadata operacional selecionada de retry/fallback;
+- redactor central passou a percorrer dataclasses/Enums/coleções, protegendo `CommandResult` aninhado;
 - persistência legada de execution também passa pelo redactor.
 
 ### Qualidade

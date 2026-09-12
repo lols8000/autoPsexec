@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.jobs import OperationClass
+from core.redaction import redact
 from core.result import CommandResult
 from execution import (
     ActionRegistry,
@@ -13,6 +14,7 @@ from execution import (
     ExecutionEngine,
     ExecutionParameter,
     ExecutionPolicyContext,
+    ExecutionRollbackRecord,
     ParameterKind,
     PrivilegeLevel,
     RecoveryResult,
@@ -653,3 +655,414 @@ def test_database_redacts_legacy_execution_payload(tmp_path: Path):
     assert "secret-password" not in encoded
     assert row["payload"]["token"] == "***"
     assert row["payload"]["nested"]["password"] == "***"
+
+
+
+def test_pre_execution_failure_is_retried_safely():
+    calls = 0
+
+    def handler(host, parameters):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            result = CommandResult.failure(
+                host,
+                "mutation",
+                "connection refused",
+                transport="winrm",
+            )
+            result.metadata["transport_failure_kind"] = "pre_execution"
+            return result
+        return CommandResult(
+            True,
+            "mutation",
+            host,
+            transport="psexec",
+            data={"Applied": True},
+        )
+
+    registry = ActionRegistry()
+    registry.register(
+        BoundExecutionAction(
+            spec=ExecutionAction(
+                key="retry.pre_execution",
+                title="Retry seguro",
+                category="test",
+                category_label="Test",
+                description="Teste.",
+                operation_class=OperationClass.LIGHT_WRITE,
+                risk=RiskLevel.LOW,
+                impact="None.",
+                retry_policy=RetryPolicy.PRE_EXECUTION_ONLY,
+                retry_attempts=2,
+                retry_delay_seconds=0,
+            ),
+            handler=handler,
+            validator=command_completed,
+        )
+    )
+
+    record = ExecutionEngine(registry).execute(
+        "PC01",
+        "retry.pre_execution",
+        {},
+        context=_context(),
+    )
+
+    assert calls == 2
+    assert record.remediation.command_result.success is True
+    assert (
+        record.remediation.command_result.metadata["execution_attempts"]
+        == 2
+    )
+    assert record.remediation.validation.status is ValidationStatus.PASS
+
+
+def test_rollback_uses_rollback_preconditions_not_forward_preconditions():
+    state = {"phase": "before"}
+
+    def forward_guard(context, parameters):
+        return [
+            PolicyCheck(
+                "forward.guard",
+                (
+                    PolicyState.PASS
+                    if state["phase"] == "before"
+                    else PolicyState.FAIL
+                ),
+                "forward",
+            )
+        ]
+
+    def rollback_guard(context, parameters):
+        return [
+            PolicyCheck(
+                "rollback.guard",
+                (
+                    PolicyState.PASS
+                    if state["phase"] == "after"
+                    else PolicyState.FAIL
+                ),
+                "rollback",
+            )
+        ]
+
+    def handler(host, parameters):
+        state["phase"] = "after"
+        return CommandResult(True, "apply", host)
+
+    def rollback(host, parameters, before):
+        state["phase"] = "before"
+        return CommandResult(True, "rollback", host)
+
+    registry = ActionRegistry()
+    registry.register(
+        BoundExecutionAction(
+            spec=ExecutionAction(
+                key="guarded.rollback",
+                title="Guarded rollback",
+                category="test",
+                category_label="Test",
+                description="Test.",
+                operation_class=OperationClass.LIGHT_WRITE,
+                risk=RiskLevel.LOW,
+                impact="None.",
+                rollback_strategy="Restaurar.",
+            ),
+            handler=handler,
+            preconditions=(forward_guard,),
+            rollback_preconditions=(rollback_guard,),
+            rollback_handler=rollback,
+        )
+    )
+    engine = ExecutionEngine(registry)
+
+    record = engine.execute(
+        "PC01",
+        "guarded.rollback",
+        {},
+        context=_context(),
+    )
+    assert state["phase"] == "after"
+
+    reverted = engine.rollback(
+        record,
+        context=_context(),
+    )
+
+    assert reverted.result.success is True
+    assert state["phase"] == "before"
+
+
+def test_redaction_recurses_into_command_result_dataclass():
+    result = CommandResult(
+        True,
+        "test",
+        "PC01",
+        data={
+            "token": "top-secret-token",
+            "nested": {"password": "top-secret-password"},
+        },
+    )
+
+    sanitized = redact(result)
+    encoded = str(sanitized)
+
+    assert "top-secret-token" not in encoded
+    assert "top-secret-password" not in encoded
+    assert sanitized["data"]["token"] == "***"
+    assert sanitized["data"]["nested"]["password"] == "***"
+
+
+def test_audit_payload_keeps_only_safe_execution_metadata():
+    registry = ActionRegistry()
+
+    def handler(host, parameters):
+        result = CommandResult(
+            True,
+            "test",
+            host,
+            transport="winrm",
+        )
+        result.metadata["credential"] = "must-not-persist"
+        result.metadata["fallback_from"] = "winrm"
+        return result
+
+    registry.register(
+        BoundExecutionAction(
+            spec=ExecutionAction(
+                key="audit.metadata",
+                title="Audit metadata",
+                category="test",
+                category_label="Test",
+                description="Test.",
+                operation_class=OperationClass.LIGHT_WRITE,
+                risk=RiskLevel.LOW,
+                impact="None.",
+            ),
+            handler=handler,
+        )
+    )
+
+    record = ExecutionEngine(registry).execute(
+        "PC01",
+        "audit.metadata",
+        {},
+        context=_context(),
+    )
+    payload = record.audit_payload()
+    metadata = payload["command"]["metadata"]
+
+    assert metadata["fallback_from"] == "winrm"
+    assert metadata["execution_attempts"] == 1
+    assert "credential" not in metadata
+    assert "must-not-persist" not in str(payload)
+
+
+
+def test_database_links_rollback_and_consumes_parent_availability(tmp_path: Path):
+    database = CentralDatabase(tmp_path / "central.db")
+
+    registry = ActionRegistry()
+    registry.register(
+        BoundExecutionAction(
+            spec=ExecutionAction(
+                key="service.rollback.persist",
+                title="Rollback persist",
+                category="services",
+                category_label="Serviços",
+                description="Test.",
+                operation_class=OperationClass.LIGHT_WRITE,
+                risk=RiskLevel.LOW,
+                impact="None.",
+                rollback_strategy="Restore.",
+            ),
+            handler=lambda host, params: CommandResult(
+                True,
+                "apply",
+                host,
+                transport="winrm",
+            ),
+            rollback_handler=lambda host, params, before: CommandResult(
+                True,
+                "rollback",
+                host,
+                transport="winrm",
+            ),
+        )
+    )
+    engine = ExecutionEngine(registry)
+    record = engine.execute(
+        "PC01",
+        "service.rollback.persist",
+        {},
+        context=_context(),
+        operator="operator",
+    )
+    parent_id = database.save_execution_record(
+        record,
+        correlation_id="ROLL001",
+    )
+
+    rollback = ExecutionRollbackRecord(
+        action_key=record.action.key,
+        host="PC01",
+        result=CommandResult(
+            True,
+            "rollback",
+            "PC01",
+            transport="winrm",
+        ),
+        validation=ValidationResult(
+            ValidationStatus.PASS,
+            "restored",
+        ),
+        started_at="2026-09-11T12:00:00+00:00",
+        finished_at="2026-09-11T12:00:01+00:00",
+        duration_ms=1000,
+    )
+    child_id = database.save_rollback_record(
+        rollback,
+        original_execution_id=parent_id,
+        operator="operator",
+        correlation_id="ROLL001",
+    )
+
+    rows = database.recent_executions("PC01", limit=5)
+    by_id = {row["id"]: row for row in rows}
+
+    assert by_id[parent_id]["rollback_available"] == 0
+    assert by_id[child_id]["rollback_of"] == parent_id
+    assert by_id[child_id]["is_rollback"] == 1
+    assert by_id[child_id]["validation_state"] == "PASS"
+
+
+
+def test_catalog_validation_sanitizes_file_roots():
+    report = validate_execution_configuration(
+        {
+            "execution": {
+                "file_roots": [
+                    r"C:\CentralN2",
+                    r"C:\CentralN2\..\Windows",
+                    "relative\\path",
+                ]
+            }
+        }
+    )
+
+    assert report.settings["execution"]["file_roots"] == [
+        r"C:\CentralN2"
+    ]
+    assert any(
+        issue.section == "execution.file_roots"
+        for issue in report.issues
+    )
+
+
+def test_catalog_validation_restores_default_file_roots_when_all_invalid():
+    report = validate_execution_configuration(
+        {
+            "execution": {
+                "file_roots": [
+                    "relative",
+                    r"C:\CentralN2\..\Windows",
+                ]
+            }
+        }
+    )
+
+    assert report.settings["execution"]["file_roots"] == [
+        r"C:\CentralN2",
+        r"C:\Temp",
+    ]
+
+
+def test_registry_rejects_rollback_strategy_without_handler():
+    registry = ActionRegistry()
+
+    try:
+        registry.register(
+            BoundExecutionAction(
+                spec=ExecutionAction(
+                    key="invalid.rollback",
+                    title="Invalid",
+                    category="test",
+                    category_label="Test",
+                    description="Test.",
+                    operation_class=OperationClass.LIGHT_WRITE,
+                    risk=RiskLevel.LOW,
+                    impact="None.",
+                    rollback_strategy="Desfazer.",
+                ),
+                handler=lambda host, params: CommandResult(
+                    True,
+                    "x",
+                    host,
+                ),
+            )
+        )
+    except ValueError as exc:
+        assert "estratégia de rollback exige handler" in str(exc)
+    else:
+        raise AssertionError("Contrato de rollback incompleto deveria falhar")
+
+
+def test_registry_rejects_temporary_disconnect_without_postcheck():
+    registry = ActionRegistry()
+
+    try:
+        registry.register(
+            BoundExecutionAction(
+                spec=ExecutionAction(
+                    key="invalid.disconnect",
+                    title="Invalid",
+                    category="test",
+                    category_label="Test",
+                    description="Test.",
+                    operation_class=OperationClass.DISRUPTIVE,
+                    risk=RiskLevel.HIGH,
+                    impact="Network.",
+                    disconnect_mode=DisconnectMode.TEMPORARY,
+                ),
+                handler=lambda host, params: CommandResult(
+                    True,
+                    "x",
+                    host,
+                ),
+            )
+        )
+    except ValueError as exc:
+        assert "TEMPORARY exige postcheck e validator" in str(exc)
+    else:
+        raise AssertionError("TEMPORARY incompleto deveria falhar")
+
+
+def test_registry_rejects_terminal_without_connectivity_impact():
+    registry = ActionRegistry()
+
+    try:
+        registry.register(
+            BoundExecutionAction(
+                spec=ExecutionAction(
+                    key="invalid.terminal",
+                    title="Invalid",
+                    category="test",
+                    category_label="Test",
+                    description="Test.",
+                    operation_class=OperationClass.DISRUPTIVE,
+                    risk=RiskLevel.HIGH,
+                    impact="Network.",
+                    disconnect_mode=DisconnectMode.TERMINAL,
+                ),
+                handler=lambda host, params: CommandResult(
+                    True,
+                    "x",
+                    host,
+                ),
+            )
+        )
+    except ValueError as exc:
+        assert "TERMINAL deve declarar may_break_connectivity" in str(exc)
+    else:
+        raise AssertionError("TERMINAL incoerente deveria falhar")

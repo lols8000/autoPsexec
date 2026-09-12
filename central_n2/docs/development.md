@@ -58,6 +58,8 @@ Preencha conscientemente:
 - action_version;
 - idempotent;
 - retry_policy;
+- retry_attempts;
+- retry_delay_seconds;
 - allowed_transports;
 - required_capabilities;
 - required_privilege;
@@ -70,6 +72,11 @@ Preencha conscientemente:
 
 O registry rejeita:
 
+- rollback_strategy sem rollback_handler;
+- rollback validator/preconditions sem rollback_handler;
+- DisconnectMode.TEMPORARY sem after_probe + validator;
+- DisconnectMode.TERMINAL sem may_break_connectivity;
+
 - timeout <= 0;
 - lista de transporte vazia/inválida;
 - ação destrutiva sem confirmação;
@@ -81,11 +88,18 @@ Não desabilite essas validações para fazer catálogo carregar.
 
 ## Retry
 
-O ExecutionEngine não faz retry automático de mutações.
+O ExecutionEngine possui retry seletivo.
 
-O RemoteExecutor só faz fallback de mutação quando a falha é comprovadamente pré-execução.
+Regras:
 
-Nunca implemente loop genérico de retry ao redor de handler mutável.
+- nunca repetir resultado `indeterminate`;
+- `PRE_EXECUTION_ONLY` só repete resultado com `transport_failure_kind=pre_execution`;
+- `SAFE_TRANSIENT` exige `idempotent=True` e pode aceitar `retry_safe=true`;
+- respeitar `retry_attempts` e `retry_delay_seconds`.
+
+O RemoteExecutor continua responsável por fallback de transporte e só faz fallback de mutação quando a falha é comprovadamente pré-execução.
+
+Nunca implemente loop genérico de retry fora desse contrato.
 
 ## Preconditions
 
@@ -111,7 +125,10 @@ Requisitos:
 - parâmetros originais;
 - postcheck;
 - rollback validator;
+- `rollback_preconditions` quando a reversão tiver pré-condições diferentes da ida;
 - auditoria.
+
+Nunca reutilize automaticamente `preconditions` da execução para o rollback: o estado pós-ação pode, por definição, invalidar a condição original.
 
 Não adicione rollback “best effort” sem prova de estado.
 
@@ -120,6 +137,12 @@ Não adicione rollback “best effort” sem prova de estado.
 Use SelectorKind para parâmetros que podem ser inventariados.
 
 Não faça módulo chamar `input()`. A UI resolve seleção.
+
+## Operações de arquivo
+
+`FileOperationsModule` deve permanecer confinado a `execution.file_roots`.
+
+Nunca substitua o guard de raízes por simples validação de "caminho absoluto". Caminhos com `..` e caminhos fora das raízes devem falhar antes do executor.
 
 ## Configuração corporativa
 

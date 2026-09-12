@@ -136,6 +136,8 @@ class ExecutionAction:
     action_version: int = 1
     idempotent: bool = False
     retry_policy: RetryPolicy = RetryPolicy.PRE_EXECUTION_ONLY
+    retry_attempts: int = 2
+    retry_delay_seconds: float = 0.75
     allowed_transports: tuple[str, ...] = (
         "local",
         "winrm",
@@ -227,6 +229,23 @@ class ExecutionRecord:
                 "error": redact(self.recovery.error),
             }
 
+        safe_command_metadata = {
+            key: command.metadata.get(key)
+            for key in (
+                "execution_attempt",
+                "execution_attempts",
+                "retry_policy",
+                "retry_scheduled",
+                "fallback_from",
+                "fallback_reason",
+                "fallback_suppressed",
+                "transport_failure_kind",
+                "disconnect_mode",
+                "action_version",
+            )
+            if key in command.metadata
+        }
+
         return {
             "action": {
                 "key": self.action.key,
@@ -237,7 +256,14 @@ class ExecutionRecord:
                 "operation_class": self.action.operation_class.value,
                 "disconnect_mode": self.action.disconnect_mode.value,
                 "retry_policy": self.action.retry_policy.value,
+                "retry_attempts": self.action.retry_attempts,
+                "retry_delay_seconds": self.action.retry_delay_seconds,
                 "idempotent": self.action.idempotent,
+                "allowed_transports": list(self.action.allowed_transports),
+                "required_capabilities": list(
+                    self.action.required_capabilities
+                ),
+                "required_privilege": self.action.required_privilege.value,
                 "rollback_strategy": self.action.rollback_strategy,
             },
             "parameters": redact(self.public_parameters),
@@ -253,6 +279,7 @@ class ExecutionRecord:
                 "indeterminate": command.indeterminate,
                 "error": redact(command.stderr),
                 "data": redact(command.data),
+                "metadata": redact(safe_command_metadata),
             },
             "before": redact(self.remediation.before),
             "after": redact(self.remediation.after),

@@ -21,6 +21,19 @@ try {
 """
         return self.executor.execute_powershell_json(host, script)
 
+    def profile_inventory(self, host: str) -> CommandResult:
+        script = r"""
+Get-CimInstance Win32_UserProfile |
+    Where-Object { -not $_.Special } |
+    Select-Object LocalPath,SID,Loaded,LastUseTime |
+    Sort-Object LocalPath
+"""
+        return self.executor.execute_powershell_json(
+            host,
+            script,
+            timeout=120,
+        )
+
     def profiles(self, host: str) -> CommandResult:
         script = r"""
 $users = Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special }

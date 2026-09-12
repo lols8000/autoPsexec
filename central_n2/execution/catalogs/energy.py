@@ -37,7 +37,11 @@ def register(registry, deps: ExecutionDependencies) -> None:
                     required=False,
                     default=0,
                     min_value=0,
-                    max_value=3600,
+                    max_value=300,
+                    help_text=(
+                        "No reboot, use até 300 s para manter a ação "
+                        "dentro da janela automática de recovery."
+                    ),
                 ),
             ),
             allowed_transports=("winrm", "psexec"),

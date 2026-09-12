@@ -18,6 +18,7 @@ class AttendanceContext:
     playbook: Any = None
     remediation: Any = None
     execution: Any = None
+    rollback_stack: list[Any] = field(default_factory=list)
     report_path: Path | None = None
 
     @classmethod
@@ -34,6 +35,7 @@ class AttendanceContext:
         self.playbook = None
         self.remediation = None
         self.execution = None
+        self.rollback_stack.clear()
         self.report_path = None
 
     def belongs_to(self, host: str | None) -> bool:

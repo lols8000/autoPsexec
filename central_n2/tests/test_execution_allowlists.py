@@ -4,6 +4,7 @@ from pathlib import Path
 
 from core.result import CommandResult
 from modules.certificates import CertificatesModule
+from modules.file_ops import FileOperationsModule
 from modules.packages import PackagesModule
 from modules.registry_actions import RegistryActionsModule
 
@@ -170,3 +171,173 @@ def test_registry_action_uses_only_allowlisted_payload():
     assert "HKLM:\\SOFTWARE\\Empresa\\Produto" in script
     assert "Enabled" in script
     assert "New-ItemProperty" in script
+
+
+
+class LocalRecordingExecutor(RecordingExecutor):
+    @staticmethod
+    def is_local(host: str) -> bool:
+        return True
+
+    def execute_powershell_json(
+        self,
+        host: str,
+        script: str,
+        timeout: int | None = None,
+    ) -> CommandResult:
+        self.commands.append(("powershell-read", host, script))
+        return CommandResult(
+            True,
+            script,
+            host,
+            data={
+                "Exists": True,
+                "Value": 1,
+                "ValueKind": "DWord",
+            },
+            transport="local",
+        )
+
+
+def test_package_copy_uses_direct_path_for_local_target(tmp_path: Path):
+    source = tmp_path / "app.msi"
+    source.write_bytes(b"package")
+    destination = tmp_path / "remote" / "app.msi"
+
+    executor = LocalRecordingExecutor()
+    module = PackagesModule(
+        executor,
+        {
+            "packages": {
+                "app": {
+                    "source": str(source),
+                    "remote_path": str(destination),
+                    "type": "msi",
+                    "cleanup": False,
+                }
+            }
+        },
+    )
+
+    result = module.install("localhost", "app")
+
+    assert result.success is True
+    assert destination.read_bytes() == b"package"
+    assert all("\\\\localhost\\" not in command for _, _, command in executor.commands)
+
+
+def test_certificate_copy_uses_direct_path_for_local_target(tmp_path: Path):
+    source = tmp_path / "ca.cer"
+    source.write_bytes(b"certificate")
+    destination = tmp_path / "remote" / "ca.cer"
+
+    executor = LocalRecordingExecutor()
+    module = CertificatesModule(
+        executor,
+        {
+            "certificates": {
+                "ca": {
+                    "source": str(source),
+                    "remote_path": str(destination),
+                    "store": "Root",
+                }
+            }
+        },
+    )
+
+    result = module.import_certificate("localhost", "ca")
+
+    assert result.success is True
+    assert destination.read_bytes() == b"certificate"
+    assert "\\\\localhost\\" not in executor.commands[-1][2]
+
+
+def test_registry_rollback_restores_original_value_kind():
+    executor = RecordingExecutor()
+    module = RegistryActionsModule(
+        executor,
+        {
+            "registry_actions": {
+                "policy": {
+                    "path": r"HKLM:\SOFTWARE\Empresa",
+                    "name": "Enabled",
+                    "type": "String",
+                    "value": "new",
+                    "mode": "set",
+                }
+            }
+        },
+    )
+
+    result = module.rollback(
+        "PC01",
+        "policy",
+        {
+            "Exists": True,
+            "Value": 1,
+            "ValueKind": "DWord",
+        },
+    )
+
+    assert result.success is True
+    script = executor.commands[-1][2]
+    assert "-PropertyType DWord" in script
+    assert "-Value 1" in script
+
+
+
+def test_file_operations_reject_path_outside_allowed_roots():
+    executor = RecordingExecutor()
+    module = FileOperationsModule(
+        executor,
+        allowed_roots=[r"C:\CentralN2", r"C:\Temp"],
+    )
+
+    try:
+        module.remove_file(
+            "PC01",
+            r"C:\Windows\System32\kernel32.dll",
+        )
+    except ValueError as exc:
+        assert "fora das raízes permitidas" in str(exc)
+    else:
+        raise AssertionError("Caminho fora da allowlist deveria falhar")
+
+    assert executor.commands == []
+
+
+def test_file_operations_reject_parent_traversal():
+    executor = RecordingExecutor()
+    module = FileOperationsModule(
+        executor,
+        allowed_roots=[r"C:\CentralN2"],
+    )
+
+    try:
+        module.ensure_directory(
+            "PC01",
+            r"C:\CentralN2\..\Windows\Temp",
+        )
+    except ValueError as exc:
+        assert "'..'" in str(exc)
+    else:
+        raise AssertionError("Traversal deveria falhar")
+
+    assert executor.commands == []
+
+
+def test_file_operations_accept_scoped_path():
+    executor = RecordingExecutor()
+    module = FileOperationsModule(
+        executor,
+        allowed_roots=[r"C:\CentralN2"],
+    )
+
+    result = module.ensure_directory(
+        "PC01",
+        r"C:\CentralN2\Packages",
+    )
+
+    assert result.success is True
+    assert len(executor.commands) == 1
+    assert r"C:\CentralN2\Packages" in executor.commands[0][2]

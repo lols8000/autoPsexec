@@ -63,5 +63,11 @@
   },
   "packages": {},
   "certificates": {},
-  "registry_actions": {}
+  "registry_actions": {},
+  "execution": {
+    "file_roots": [
+      "C:\\CentralN2",
+      "C:\\Temp"
+    ]
+  }
 }

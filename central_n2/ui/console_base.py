@@ -108,7 +108,11 @@ class ConsoleBase:
         self.packages = PackagesModule(executor, self.settings)
         self.certificates = CertificatesModule(executor, self.settings)
         self.registry_actions = RegistryActionsModule(executor, self.settings)
-        self.file_ops = FileOperationsModule(executor)
+        execution_settings = self.settings.get("execution", {})
+        self.file_ops = FileOperationsModule(
+            executor,
+            allowed_roots=execution_settings.get("file_roots"),
+        )
 
     @staticmethod
     def clear() -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import getpass
 import json
-import re
 import time
 from dataclasses import asdict
 from datetime import datetime
@@ -1722,7 +1721,7 @@ class ConsoleUIV5(ConsoleBase):
         elif selector is SelectorKind.PROFILE:
             result = load(
                 "Carregando perfis",
-                lambda: self.users.profiles(self.host),
+                lambda: self.users.profile_inventory(self.host),
             )
             if isinstance(result, CommandResult) and result.success:
                 for item in self._list_payload(result):
@@ -1761,18 +1760,20 @@ class ConsoleUIV5(ConsoleBase):
         elif selector is SelectorKind.SESSION:
             result = load(
                 "Carregando sessões",
-                lambda: self.system.sessions(self.host),
+                lambda: self.system.session_inventory(self.host),
             )
             if isinstance(result, CommandResult) and result.success:
-                for line in result.stdout.splitlines()[1:]:
-                    values = re.findall(r"\b\d+\b", line)
-                    if not values:
+                for item in self._list_payload(result):
+                    session_id = item.get("SessionId")
+                    if session_id is None:
                         continue
-                    session_id = int(values[0])
                     options.append(
                         (
-                            session_id,
-                            re.sub(r"\s+", " ", line.strip()),
+                            int(session_id),
+                            (
+                                f"{item.get('UserName') or 'usuário não resolvido'} | "
+                                f"SessionId {session_id}"
+                            ),
                         )
                     )
 
@@ -1922,7 +1923,8 @@ class ConsoleUIV5(ConsoleBase):
         print(
             f"Transportes: {', '.join(spec.allowed_transports)} | "
             f"Idempotente: {'SIM' if spec.idempotent else 'NÃO'} | "
-            f"Retry: {spec.retry_policy.value}"
+            f"Retry: {spec.retry_policy.value} "
+            f"({spec.retry_attempts}x / {spec.retry_delay_seconds:.2f}s base)"
         )
         if spec.required_capabilities:
             print(
@@ -1980,7 +1982,11 @@ class ConsoleUIV5(ConsoleBase):
         return actions[int(option) - 1]
 
     def _rollback_last_execution(self) -> None:
-        record = self.context.execution
+        record = (
+            self.context.rollback_stack[-1]
+            if self.context.rollback_stack
+            else None
+        )
         if (
             record is None
             or not record.rollback_available
@@ -2042,6 +2048,11 @@ class ConsoleUIV5(ConsoleBase):
 
         if rollback.validation.status is ValidationStatus.PASS:
             record.rollback_available = False
+            if (
+                self.context.rollback_stack
+                and self.context.rollback_stack[-1] is record
+            ):
+                self.context.rollback_stack.pop()
 
         self.pause()
 
@@ -2122,6 +2133,8 @@ class ConsoleUIV5(ConsoleBase):
         remediation = record.remediation
         self.context.remediation = remediation
         self.context.execution = record
+        if record.rollback_available:
+            self.context.rollback_stack.append(record)
         self.show_result(remediation.command_result)
 
         if record.recovery is not None:
@@ -2240,9 +2253,9 @@ class ConsoleUIV5(ConsoleBase):
 
             print("B - Buscar ação")
             if (
-                self.context.execution is not None
-                and self.context.execution.rollback_available
-                and self.context.execution.rollback_result is None
+                bool(self.context.rollback_stack)
+                and self.context.rollback_stack[-1].rollback_available
+                and self.context.rollback_stack[-1].rollback_result is None
             ):
                 print("U - Desfazer última execução reversível")
             print("0 - Voltar")

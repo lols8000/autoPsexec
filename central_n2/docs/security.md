@@ -56,7 +56,7 @@ Padrão: `PRE_EXECUTION_ONLY`.
 
 `SAFE_TRANSIENT` só é válido para ação idempotente.
 
-Resultado indeterminado não sofre repetição automática cega.
+A Central respeita `retry_attempts` e `retry_delay_seconds`, mas só agenda nova tentativa quando a falha é comprovadamente pré-execução ou explicitamente marcada como segura. Resultado indeterminado nunca sofre repetição automática.
 
 ## Disconnect esperado
 
@@ -74,7 +74,20 @@ Rollback só é oferecido quando:
 - existe operação tecnicamente inversa;
 - after probe consegue validar restauração.
 
-A Central não simula rollback para ações irreversíveis.
+A Central não simula rollback para ações irreversíveis. Preconditions da reversão são independentes das preconditions da ida, evitando overwrite ou restauração sobre estado novo inesperado.
+
+O atendimento mantém uma pilha LIFO de execuções reversíveis. Uma ação não reversível posterior não apaga a possibilidade de desfazer a reversível anterior; o rollback sempre atua primeiro sobre a reversível mais recente.
+
+## Operações de arquivo
+
+A Central não aceita qualquer caminho absoluto como alvo de mutação.
+
+`execution.file_roots` limita as operações de arquivo a raízes explícitas. Defaults:
+
+- `C:\CentralN2`;
+- `C:\Temp`.
+
+Traversal com `..` é bloqueado antes de montar o PowerShell. Origem e destino de move precisam permanecer dentro das raízes autorizadas.
 
 ## Allowlist corporativa
 
@@ -108,7 +121,7 @@ Use `settings.local.json`.
 
 Parâmetros marcados `sensitive=True` são substituídos por `***`.
 
-Campos comuns como password/token/secret também passam pelo redactor central.
+Campos comuns como password/token/secret também passam pelo redactor central. O redactor percorre dataclasses, enums e coleções aninhadas, inclusive `CommandResult`.
 
 ## WinRM e PsExec
 

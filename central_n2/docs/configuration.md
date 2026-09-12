@@ -184,6 +184,29 @@ entrada inválida
 
 A validação é estrutural. Um share temporariamente offline não deve invalidar o schema do catálogo.
 
+## Execução / file_roots
+
+Operações explícitas de arquivo são confinadas a raízes autorizadas.
+
+Padrão:
+
+```json
+{
+  "execution": {
+    "file_roots": [
+      "C:\\CentralN2",
+      "C:\\Temp"
+    ]
+  }
+}
+```
+
+`ensure directory`, `move/rename` e `remove file` recusam caminhos fora dessas raízes e caminhos que contenham `..`.
+
+A validação ocorre no bootstrap. Se todas as raízes configuradas forem inválidas, a Central restaura os defaults seguros.
+
+Essa configuração não libera shell nem exclusão recursiva genérica.
+
 ## Persistence
 
 `persistence.enabled` ativa SQLite.

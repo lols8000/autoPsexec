@@ -69,7 +69,10 @@ class RegistryActionsModule:
         return safe_key, item
 
     @staticmethod
-    def _render_value(value: Any) -> str:
+    def _render_value(
+        value: Any,
+        value_type: str | None = None,
+    ) -> str:
         if isinstance(value, str):
             return quote_powershell_literal(value)
         if isinstance(value, bool):
@@ -77,6 +80,17 @@ class RegistryActionsModule:
         if isinstance(value, (int, float)):
             return str(value)
         if isinstance(value, list):
+            if value_type == "Binary":
+                try:
+                    numbers = ",".join(
+                        str(int(entry))
+                        for entry in value
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "Valor Binary deve conter apenas bytes numéricos."
+                    ) from exc
+                return f"@({numbers})"
             items = ",".join(
                 quote_powershell_literal(str(entry))
                 for entry in value
@@ -98,15 +112,19 @@ class RegistryActionsModule:
         script = f"""
 $exists = $false
 $value = $null
+$valueKind = $null
 if (Test-Path {safe_path}) {{
     try {{
+        $key = Get-Item -Path {safe_path} -ErrorAction Stop
         $value = Get-ItemPropertyValue -Path {safe_path} -Name {safe_name} -ErrorAction Stop
+        $valueKind = $key.GetValueKind({safe_name}).ToString()
         $exists = $true
     }} catch {{}}
 }}
 [pscustomobject]@{{
     Exists = [bool]$exists
     Value = $value
+    ValueKind = $valueKind
     Path = {safe_path}
     Name = {safe_name}
     CatalogKey = '{safe_key}'
@@ -147,7 +165,10 @@ if (Test-Path {safe_path}) {{
                     f"Tipo de Registro não permitido: {value_type}",
                 )
             try:
-                ps_value = self._render_value(item.get("value"))
+                ps_value = self._render_value(
+                    item.get("value"),
+                    allowed_type,
+                )
             except ValueError as exc:
                 return CommandResult.failure(
                     host,
@@ -205,16 +226,22 @@ $value = Get-ItemPropertyValue -Path {safe_path} -Name {safe_name} -ErrorAction 
         safe_name = quote_powershell_literal(name)
 
         if evidence.get("Exists") is True:
-            value_type = str(item.get("type") or "String")
+            value_type = str(evidence.get("ValueKind") or "")
             allowed_type = self.ALLOWED_TYPES.get(value_type)
             if not allowed_type:
                 return CommandResult.failure(
                     host,
                     safe_key,
-                    f"Tipo de Registro não permitido: {value_type}",
+                    (
+                        "Tipo original do Registro não é restaurável "
+                        f"automaticamente: {value_type or 'desconhecido'}"
+                    ),
                 )
             try:
-                previous = self._render_value(evidence.get("Value"))
+                previous = self._render_value(
+                    evidence.get("Value"),
+                    allowed_type,
+                )
             except ValueError as exc:
                 return CommandResult.failure(
                     host,

@@ -470,7 +470,7 @@ class CentralDatabase:
                     now,
                     action,
                     int(success),
-                    self._encode(payload),
+                    self._encode(redact(payload)),
                     correlation_id,
                 ),
             )
@@ -639,6 +639,15 @@ class CentralDatabase:
                     1,
                 ),
             )
+            if validation.status.value == "PASS":
+                connection.execute(
+                    """
+                    UPDATE executions
+                    SET rollback_available=0
+                    WHERE id=?
+                    """,
+                    (original_execution_id,),
+                )
             return int(cursor.lastrowid)
 
     def recent_executions(
@@ -667,6 +676,7 @@ class CentralDatabase:
             {
                 **dict(row),
                 "payload": json.loads(row["payload"]),
+                "parameters": json.loads(row["parameters"] or "{}"),
             }
             for row in rows
         ]

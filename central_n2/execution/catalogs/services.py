@@ -13,6 +13,7 @@ from ..models import (
     RiskLevel,
     SelectorKind,
 )
+from ..policy import PolicyCheck, PolicyState
 from ..validators import service_running, service_stopped
 from .common import ExecutionDependencies, _register, _startup_type
 
@@ -129,6 +130,66 @@ def _validate_startup_rollback(
     )
 
 
+def _service_status_reversible(
+    deps: ExecutionDependencies,
+):
+    def check(context, parameters):
+        result = deps.system.service_status(
+            context.host,
+            parameters["service_name"],
+        )
+        data = _payload(result)
+        status = str(data.get("Status") or "")
+        ok = result.success and status in {"Running", "Stopped"}
+        return [
+            PolicyCheck(
+                "service.rollback.state",
+                PolicyState.PASS if ok else PolicyState.FAIL,
+                (
+                    f"Estado original reversível: {status}."
+                    if ok
+                    else "Estado original do serviço não é restaurável automaticamente."
+                ),
+                data if data else result.stderr,
+            )
+        ]
+
+    return check
+
+
+def _startup_type_reversible(
+    deps: ExecutionDependencies,
+):
+    def check(context, parameters):
+        result = deps.system.service_status(
+            context.host,
+            parameters["service_name"],
+        )
+        data = _payload(result)
+        startup = str(data.get("StartType") or "")
+        ok = (
+            result.success
+            and startup in {"Automatic", "Manual", "Disabled"}
+        )
+        return [
+            PolicyCheck(
+                "service.rollback.startup",
+                PolicyState.PASS if ok else PolicyState.FAIL,
+                (
+                    f"StartType original reversível: {startup}."
+                    if ok
+                    else (
+                        "StartType original não pode ser restaurado "
+                        "automaticamente por esta ação."
+                    )
+                ),
+                data if data else result.stderr,
+            )
+        ]
+
+    return check
+
+
 def _service_rollback_handler(deps: ExecutionDependencies):
     def handler(
         host: str,
@@ -201,6 +262,11 @@ def register(registry, deps: ExecutionDependencies) -> None:
                 p["service_name"],
             ),
             validator=validator,
+            preconditions=(
+                (_service_status_reversible(deps),)
+                if rollback_handler is not None
+                else ()
+            ),
             rollback_handler=rollback_handler,
             rollback_validator=rollback_validator,
         )
@@ -249,6 +315,7 @@ def register(registry, deps: ExecutionDependencies) -> None:
             p["service_name"],
         ),
         validator=_startup_type,
+        preconditions=(_startup_type_reversible(deps),),
         rollback_handler=lambda host, p, before: _rollback_startup(
             deps,
             host,

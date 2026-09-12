@@ -285,6 +285,7 @@ def _register(
     after_probe=None,
     validator=None,
     preconditions=(),
+    rollback_preconditions=(),
     rollback_handler=None,
     rollback_validator=None,
 ) -> None:
@@ -296,6 +297,7 @@ def _register(
             after_probe=after_probe,
             validator=validator,
             preconditions=tuple(preconditions),
+            rollback_preconditions=tuple(rollback_preconditions),
             rollback_handler=rollback_handler,
             rollback_validator=rollback_validator,
         )

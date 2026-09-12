@@ -16,6 +16,38 @@ class SystemModule:
     def sessions(self, host: str) -> CommandResult:
         return self.executor.execute_cmd(host, "quser")
 
+    def session_inventory(self, host: str) -> CommandResult:
+        script = r"""
+$rows = @(
+    Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $owner = Invoke-CimMethod -InputObject $_ -MethodName GetOwner -ErrorAction SilentlyContinue
+            $user = $null
+            if ($owner -and $owner.ReturnValue -eq 0) {
+                $user = if ($owner.Domain) {
+                    "$($owner.Domain)\$($owner.User)"
+                } else {
+                    $owner.User
+                }
+            }
+            [pscustomobject]@{
+                SessionId = [int]$_.SessionId
+                UserName = $user
+                ProcessId = [int]$_.ProcessId
+            }
+        }
+)
+$rows |
+    Group-Object SessionId |
+    ForEach-Object { $_.Group[0] } |
+    Sort-Object SessionId
+"""
+        return self.executor.execute_powershell_json(
+            host,
+            script,
+            timeout=120,
+        )
+
     def send_message(self, host: str, message: str) -> CommandResult:
         safe = message.replace('"', "'").replace("\r", " ").replace("\n", " ")
         return self.executor.execute_mutating_cmd(host, f'msg * "{safe}"')
