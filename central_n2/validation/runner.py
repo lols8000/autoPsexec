@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import time
 import uuid
@@ -732,79 +731,6 @@ class EndpointValidationRunner:
         )
 
 
-def load_campaign(path: Path) -> tuple[str, list[EndpointSpec]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("A campanha deve ser um objeto JSON.")
-
-    name = str(payload.get("name") or "central-n2-field-validation")
-    raw_endpoints = payload.get("endpoints")
-    if not isinstance(raw_endpoints, list):
-        raise ValueError("'endpoints' deve ser uma lista.")
-
-    endpoints: list[EndpointSpec] = []
-    aliases: set[str] = set()
-    for raw in raw_endpoints:
-        if not isinstance(raw, dict):
-            raise ValueError("Cada endpoint deve ser um objeto.")
-        alias = str(raw.get("alias") or "").strip()
-        target = str(raw.get("target") or "").strip()
-        if not alias or not target:
-            raise ValueError("Endpoint exige alias e target.")
-        if alias.casefold() in aliases:
-            raise ValueError(f"Alias duplicado: {alias}")
-        aliases.add(alias.casefold())
-
-        raw_actions = raw.get("actions", [])
-        if not isinstance(raw_actions, list):
-            raise ValueError(
-                f"Endpoint {alias}: 'actions' deve ser uma lista."
-            )
-
-        actions = tuple(
-            ControlledActionSpec(
-                key=str(item.get("key") or "").strip(),
-                parameters=dict(item.get("parameters") or {}),
-                rollback_after=bool(
-                    item.get("rollback_after", False)
-                ),
-            )
-            for item in raw_actions
-            if isinstance(item, dict)
-        )
-        endpoints.append(
-            EndpointSpec(
-                alias=alias,
-                target=target,
-                enabled=bool(raw.get("enabled", True)),
-                expected_state=(
-                    str(raw["expected_state"])
-                    if raw.get("expected_state")
-                    else None
-                ),
-                expected_transport=(
-                    str(raw["expected_transport"])
-                    if raw.get("expected_transport")
-                    else None
-                ),
-                required_capabilities=tuple(
-                    str(item)
-                    for item in raw.get(
-                        "required_capabilities",
-                        [],
-                    )
-                ),
-                roles=tuple(
-                    str(item)
-                    for item in raw.get("roles", [])
-                ),
-                actions=actions,
-            )
-        )
-
-    return name, endpoints
-
-
 def run_campaign(
     runner: EndpointValidationRunner,
     name: str,
@@ -825,62 +751,3 @@ def run_campaign(
     )
 
 
-def write_reports(
-    campaign: CampaignResult,
-    output_dir: Path,
-) -> tuple[Path, Path]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    json_path = output_dir / f"endpoint-validation-{stamp}.json"
-    md_path = output_dir / f"endpoint-validation-{stamp}.md"
-
-    json_path.write_text(
-        json.dumps(
-            campaign.public_dict(),
-            indent=2,
-            ensure_ascii=False,
-            default=str,
-        ),
-        encoding="utf-8",
-    )
-
-    lines = [
-        f"# Homologação de endpoints — {campaign.name}",
-        "",
-        f"Status geral: **{campaign.status.value}**",
-        f"Início: {campaign.started_at}",
-        f"Fim: {campaign.finished_at}",
-        "",
-    ]
-    for endpoint in campaign.endpoints:
-        lines.extend(
-            [
-                f"## {endpoint.alias}",
-                "",
-                f"- Status: **{endpoint.status.value}**",
-                (
-                    "- Target fingerprint: "
-                    f"{endpoint.target_fingerprint}"
-                ),
-                (
-                    "- Correlation ID: "
-                    f"{endpoint.correlation_id}"
-                ),
-                "",
-                "| Check | Estado | Mensagem |",
-                "|---|---|---|",
-            ]
-        )
-        for check in endpoint.checks:
-            message = check.message.replace("|", "\\|").replace(
-                "\n",
-                " ",
-            )
-            lines.append(
-                f"| {check.key} | **{check.state.value}** | "
-                f"{message} |"
-            )
-        lines.append("")
-
-    md_path.write_text("\n".join(lines), encoding="utf-8")
-    return json_path, md_path
