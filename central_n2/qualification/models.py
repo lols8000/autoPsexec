@@ -50,12 +50,40 @@ class QualificationReport:
     operator: str | None = None
     version: str | None = None
 
+    def _case(self, key: str) -> QualificationCaseResult | None:
+        return next(
+            (case for case in self.cases if case.key == key),
+            None,
+        )
+
+    def _profile_requirement_met(self) -> bool:
+        specialized_cases = {
+            "printer": "printers.inventory",
+            "glpi": "glpi.status",
+            "domain": "domain.status",
+        }
+        case_key = specialized_cases.get(self.profile)
+        if case_key:
+            case = self._case(case_key)
+            return case is not None and case.status is CaseStatus.PASS
+
+        if self.profile == "notebook":
+            capabilities = self._case("core.capabilities")
+            evidence = capabilities.evidence if capabilities else None
+            return (
+                isinstance(evidence, dict)
+                and evidence.get("Battery") is True
+            )
+
+        return True
+
     @property
     def passed(self) -> bool:
-        return not any(
+        no_unresolved_failure = not any(
             case.status in {CaseStatus.FAIL, CaseStatus.UNKNOWN}
             for case in self.cases
         )
+        return no_unresolved_failure and self._profile_requirement_met()
 
     def summary(self) -> dict[str, int]:
         counts = {status.value: 0 for status in CaseStatus}
