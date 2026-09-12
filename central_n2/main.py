@@ -63,6 +63,61 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--gui", action="store_true")
     parser.add_argument("--version", action="store_true")
+    parser.add_argument(
+        "--qualify",
+        action="append",
+        metavar="HOST",
+        help=(
+            "Executa a matriz de homologação de endpoint. Pode ser repetido "
+            "para múltiplos hosts em modo somente-leitura."
+        ),
+    )
+    parser.add_argument(
+        "--qualification-profile",
+        default="auto",
+        choices=(
+            "auto",
+            "local",
+            "winrm",
+            "psexec",
+            "notebook",
+            "printer",
+            "glpi",
+            "domain",
+        ),
+    )
+    parser.add_argument(
+        "--qualification-action",
+        action="append",
+        default=[],
+        metavar="ACTION_KEY",
+        help="Ação real a incluir explicitamente na homologação.",
+    )
+    parser.add_argument(
+        "--qualification-param",
+        action="append",
+        default=[],
+        metavar="ACTION:KEY=VALUE",
+        help="Parâmetro para uma ação real da homologação.",
+    )
+    parser.add_argument(
+        "--qualification-allow-disruptive",
+        action="store_true",
+        help=(
+            "Autoriza ações que podem derrubar conectividade/reiniciar a estação. "
+            "Exige --qualification-confirm-host."
+        ),
+    )
+    parser.add_argument(
+        "--qualification-confirm-host",
+        metavar="HOST",
+        help="Confirma nominalmente o único host autorizado para ação disruptiva.",
+    )
+    parser.add_argument(
+        "--qualification-output",
+        type=Path,
+        help="Diretório de evidências. Padrão: reports/qualification.",
+    )
     return parser.parse_args()
 
 
@@ -157,6 +212,26 @@ def main() -> int:
         )
 
     executor = build_executor(settings, logger)
+
+    if args.qualify:
+        from qualification.cli import run_qualification_cli
+
+        output_dir = (
+            args.qualification_output
+            or (BASE_DIR / "reports" / "qualification")
+        )
+        return run_qualification_cli(
+            executor=executor,
+            settings_path=SETTINGS_PATH,
+            settings=settings,
+            hosts=args.qualify,
+            profile=args.qualification_profile,
+            actions=args.qualification_action,
+            raw_parameters=args.qualification_param,
+            output_dir=output_dir,
+            allow_disruptive=args.qualification_allow_disruptive,
+            confirmed_host=args.qualification_confirm_host,
+        )
 
     if args.gui:
         from ui.tk_app import run_gui

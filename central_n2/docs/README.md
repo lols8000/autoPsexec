@@ -6,6 +6,7 @@
 - [configuration.md](configuration.md) — configuração efetiva, allowlists e validação no bootstrap.
 - [modules.md](modules.md) — módulos funcionais e catálogos de execução.
 - [operations.md](operations.md) — runbook operacional do suporte N2.
+- [endpoint_qualification.md](endpoint_qualification.md) — matriz real de homologação em endpoints, evidências e ações controladas.
 - [security.md](security.md) — confiança, privilege, retry, rollback e auditoria.
 - [troubleshooting.md](troubleshooting.md) — falhas de transporte, policy e recovery.
 - [development.md](development.md) — como adicionar ações e critérios de DoD.
@@ -34,4 +35,5 @@ Em caso de divergência:
 - allowlists corporativas são validadas no bootstrap;
 - SQLite schema 4 mantém auditoria rica e redigida;
 - CI verde é requisito de promoção;
+- homologação de endpoint real é requisito de release readiness e não é substituída por mocks/CI;
 - segredos nunca entram no repositório.

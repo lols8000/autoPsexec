@@ -50,7 +50,7 @@ jobs:
           core/connectivity.py core/context.py core/evaluation.py
           core/executor.py core/jobs.py core/logger.py core/result.py
           core/session.py core/transport core/updater.py core/validation.py
-          diagnostics execution playbooks remediation reports storage
+          diagnostics execution playbooks qualification remediation reports storage
           integrations/glpi/client.py
           ui/console_base.py ui/console_v5.py ui/tk_app.py
           modules/health.py modules/compliance.py modules/performance.py
@@ -70,6 +70,7 @@ jobs:
           core/evaluation.py core/updater.py core/validation.py
           execution/models.py execution/policy.py execution/config_validation.py
           execution/registry.py execution/engine.py
+          qualification/models.py qualification/runner.py qualification/cli.py
           remediation/engine.py
 
       - name: Run tests
@@ -81,7 +82,7 @@ jobs:
         run: >-
           python -m pytest -q
           --cov=core --cov=diagnostics --cov=playbooks
-          --cov=execution --cov=remediation --cov=reports --cov=storage
+          --cov=execution --cov=qualification --cov=remediation --cov=reports --cov=storage
           --cov-report=term-missing
           --cov-report=json:coverage.json
           --cov-fail-under=40
@@ -89,6 +90,14 @@ jobs:
       - name: Enforce validator coverage
         if: matrix.python-version == '3.12'
         run: python tests/check_validator_coverage.py coverage.json
+
+      - name: Run local endpoint qualification smoke
+        if: matrix.python-version == '3.12'
+        run: >-
+          python main.py
+          --qualify localhost
+          --qualification-profile local
+          --qualification-output reports/qualification-ci
 
   build:
     runs-on: windows-latest
