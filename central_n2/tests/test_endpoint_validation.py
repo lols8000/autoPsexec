@@ -11,6 +11,7 @@ from core.result import CommandResult
 from core.session import WorkstationSession
 from execution import RiskLevel
 from validation.cli import ACKNOWLEDGEMENT, _validate_flags
+from validation.config import load_campaign
 from validation.models import (
     CampaignResult,
     CheckState,
@@ -20,12 +21,11 @@ from validation.models import (
     ValidationCheck,
     fingerprint_target,
 )
+from validation.reporting import write_reports
 from validation.runner import (
     EndpointValidationRunner,
     _check_from_result,
-    load_campaign,
     run_campaign,
-    write_reports,
 )
 
 
