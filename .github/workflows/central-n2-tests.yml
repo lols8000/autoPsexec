@@ -5,6 +5,8 @@ on:
     paths:
       - 'central_n2/**'
       - '.github/workflows/central-n2-tests.yml'
+      - '.github/workflows/central-n2-release.yml'
+      - '.github/workflows/release-tag.yml'
       - '.github/rulesets/**'
       - '.github/CODEOWNERS'
       - 'scripts/configure_master_protection.ps1'

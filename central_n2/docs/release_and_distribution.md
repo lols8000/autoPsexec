@@ -155,6 +155,27 @@ Critérios usados antes da limpeza inicial:
 - implementações abandonadas devem ter o PR fechado com justificativa antes
   da remoção da ref.
 
+## Promoção de tag
+
+A criação de tags oficiais é separada da publicação da release.
+
+O workflow `.github/workflows/release-tag.yml`:
+
+- recebe uma tag SemVer e um commit já homologado;
+- valida que o commit existe e é ancestral de `master`;
+- confirma que `VERSION`, `core/version.py`, `pyproject.toml`,
+  `installer/CentralN2.iss` e `version_info.txt` correspondem à tag;
+- cria uma **tag anotada**;
+- é idempotente quando a mesma tag já aponta para o mesmo commit;
+- falha se uma tag existente apontar para outro commit.
+
+Para a 5.2.0, o commit congelado é
+`da28161fb826abd418ef8491d45db8d4e15e5282`.
+
+A publicação da release permanece uma etapa separada. O workflow
+`.github/workflows/central-n2-release.yml` aceita tanto evento de tag quanto
+execução manual sobre uma tag já existente.
+
 ## Política de release
 
 Não publicar tag se:
