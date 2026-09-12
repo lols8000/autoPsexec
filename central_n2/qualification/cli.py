@@ -89,6 +89,11 @@ def run_qualification_cli(
             failed = True
             continue
 
+        # A abertura de sessão pode falhar antes do fluxo normal de exportação.
+        # Ainda assim a falha é evidência de homologação e deve ser preservada.
+        if report.connectivity_state == "ERROR":
+            runner.export(report)
+
         summary = report.summary()
         print(
             f"Transporte: {report.transport} | "
