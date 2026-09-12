@@ -91,6 +91,14 @@ jobs:
         if: matrix.python-version == '3.12'
         run: python tests/check_validator_coverage.py coverage.json
 
+      - name: Run local endpoint qualification smoke
+        if: matrix.python-version == '3.12'
+        run: >-
+          python main.py
+          --qualify localhost
+          --qualification-profile local
+          --qualification-output reports/qualification-ci
+
   build:
     runs-on: windows-latest
     needs: test
