@@ -1,0 +1,4 @@
+# Ownership explícito do repositório.
+# A exigência de aprovação por CODEOWNER permanece desativada enquanto
+# houver um único mantenedor efetivo.
+* @lols8000

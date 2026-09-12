@@ -11,6 +11,7 @@
 - [troubleshooting.md](troubleshooting.md) — falhas de transporte, policy e recovery.
 - [development.md](development.md) — como adicionar ações e critérios de DoD.
 - [release_and_distribution.md](release_and_distribution.md) — CI, build, assinatura, hashes e release.
+- [repository_governance.md](repository_governance.md) — proteção do master, ruleset e governança do repositório.
 - [v5_complete.md](v5_complete.md) — visão consolidada da geração 5.2.
 - [workstation_v2.md](workstation_v2.md) — referência histórica.
 

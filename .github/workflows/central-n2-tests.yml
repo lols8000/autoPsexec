@@ -5,6 +5,12 @@ on:
     paths:
       - 'central_n2/**'
       - '.github/workflows/central-n2-tests.yml'
+      - '.github/rulesets/**'
+      - '.github/CODEOWNERS'
+      - 'scripts/configure_master_protection.ps1'
+      - '.github/rulesets/**'
+      - '.github/CODEOWNERS'
+      - 'scripts/configure_master_protection.ps1'
   pull_request:
     paths:
       - 'central_n2/**'
@@ -40,6 +46,11 @@ jobs:
 
       - name: Compile with SyntaxWarning as error
         run: python -W error::SyntaxWarning -m compileall -q .
+
+      - name: Validate master protection manifest
+        if: matrix.python-version == '3.12'
+        shell: pwsh
+        run: '& ..\scripts\configure_master_protection.ps1 -ValidateOnly'
 
       - name: Ruff correctness checks
         if: matrix.python-version == '3.12'
