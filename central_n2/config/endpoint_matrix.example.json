@@ -1,0 +1,119 @@
+{
+  "name": "central-n2-5.2-field-validation",
+  "endpoints": [
+    {
+      "alias": "LOCAL-ADMIN",
+      "target": "localhost",
+      "enabled": false,
+      "expected_state": "READY_LOCAL",
+      "expected_transport": "local",
+      "required_capabilities": [
+        "IsAdmin"
+      ],
+      "roles": [
+        "network"
+      ],
+      "actions": [
+        {
+          "key": "network.flush_dns",
+          "parameters": {},
+          "rollback_after": false
+        }
+      ]
+    },
+    {
+      "alias": "DOMAIN-WINRM",
+      "target": "REPLACE-WINRM-HOST",
+      "enabled": false,
+      "expected_state": "READY_WINRM",
+      "expected_transport": "winrm",
+      "required_capabilities": [
+        "IsAdmin",
+        "DomainMember"
+      ],
+      "roles": [
+        "domain",
+        "network"
+      ]
+    },
+    {
+      "alias": "DOMAIN-PSEXEC",
+      "target": "REPLACE-PSEXEC-HOST",
+      "enabled": false,
+      "expected_state": "READY_PSEXEC",
+      "expected_transport": "psexec",
+      "required_capabilities": [
+        "IsAdmin"
+      ],
+      "roles": [
+        "network",
+        "pnp"
+      ]
+    },
+    {
+      "alias": "NOTEBOOK-WIFI",
+      "target": "REPLACE-NOTEBOOK-HOST",
+      "enabled": false,
+      "required_capabilities": [
+        "IsAdmin",
+        "NetAdapter",
+        "Battery"
+      ],
+      "roles": [
+        "network",
+        "laptop"
+      ]
+    },
+    {
+      "alias": "PRINT",
+      "target": "REPLACE-PRINT-HOST",
+      "enabled": false,
+      "required_capabilities": [
+        "IsAdmin",
+        "PrinterManagement"
+      ],
+      "roles": [
+        "printer"
+      ],
+      "actions": [
+        {
+          "key": "printer.restart_spooler",
+          "parameters": {},
+          "rollback_after": false
+        }
+      ]
+    },
+    {
+      "alias": "GLPI",
+      "target": "REPLACE-GLPI-HOST",
+      "enabled": false,
+      "required_capabilities": [
+        "IsAdmin",
+        "GLPI"
+      ],
+      "roles": [
+        "glpi"
+      ]
+    },
+    {
+      "alias": "CONTROLLED-REBOOT",
+      "target": "REPLACE-REBOOT-HOST",
+      "enabled": false,
+      "required_capabilities": [
+        "IsAdmin"
+      ],
+      "roles": [
+        "network"
+      ],
+      "actions": [
+        {
+          "key": "energy.restart",
+          "parameters": {
+            "delay_seconds": 0
+          },
+          "rollback_after": false
+        }
+      ]
+    }
+  ]
+}
