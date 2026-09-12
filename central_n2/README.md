@@ -152,6 +152,20 @@ A Central não expõe:
 
 Consulte `docs/security.md`.
 
+
+## Homologação de endpoints reais
+
+A validação de campo usa uma matriz local e gera evidências sanitizadas em JSON/Markdown.
+
+Modo somente leitura:
+
+```powershell
+cd central_n2
+python -m validation.cli --matrix config/endpoint_matrix.local.json
+```
+
+Ações controladas permanecem opt-in e exigem confirmação explícita. Consulte `docs/endpoint_validation.md` antes de habilitar mutações, HIGH ou reboot.
+
 ## Testes
 
 ```powershell
