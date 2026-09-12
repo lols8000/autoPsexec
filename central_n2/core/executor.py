@@ -327,14 +327,14 @@ class RemoteExecutor:
         )
 
     @staticmethod
-    def _parse_json_output(text: str):
-        """Extrai o primeiro JSON válido mesmo quando o transporte adiciona ruído."""
+    def _try_parse_json_output(text: str) -> tuple[bool, object | None]:
+        """Extrai JSON estruturado sem confundir JSON null com falha de parse."""
         if not text or not text.strip():
-            return None
+            return False, None
 
         value = text.strip()
         try:
-            return json.loads(value)
+            return True, json.loads(value)
         except json.JSONDecodeError:
             pass
 
@@ -344,10 +344,37 @@ class RemoteExecutor:
                 continue
             try:
                 data, _ = decoder.raw_decode(value[index:])
-                return data
+                return True, data
             except json.JSONDecodeError:
                 continue
-        return None
+        return False, None
+
+    @classmethod
+    def _parse_json_output(cls, text: str):
+        """Compatibilidade: retorna o primeiro JSON válido ou None."""
+        parsed, data = cls._try_parse_json_output(text)
+        return data if parsed else None
+
+    @classmethod
+    def _apply_json_contract(
+        cls,
+        result: CommandResult,
+        *,
+        reason: str,
+    ) -> CommandResult:
+        """Exige payload JSON válido quando a API promete resultado estruturado."""
+        result.metadata["structured_output_expected"] = True
+        if not result.success:
+            return result
+
+        parsed, data = cls._try_parse_json_output(result.stdout)
+        if parsed:
+            result.data = data
+            result.metadata["json_parsed"] = True
+            return result
+
+        result.metadata["json_parse_error"] = True
+        return result.mark_indeterminate(reason)
 
     def execute_powershell_json(
         self,
@@ -362,13 +389,13 @@ class RemoteExecutor:
             timeout=timeout,
             fallback_mode="read_only",
         )
-        if result.success and result.stdout.strip():
-            parsed = self._parse_json_output(result.stdout)
-            if parsed is not None:
-                result.data = parsed
-            else:
-                result.metadata["json_parse_error"] = True
-        return result
+        return self._apply_json_contract(
+            result,
+            reason=(
+                "O comando de leitura terminou, mas o resultado estruturado "
+                "não pôde ser validado."
+            ),
+        )
 
     def execute_mutating_powershell_json(
         self,
@@ -383,16 +410,13 @@ class RemoteExecutor:
             timeout=timeout,
             fallback_mode="mutation",
         )
-        if result.success and result.stdout.strip():
-            parsed = self._parse_json_output(result.stdout)
-            if parsed is not None:
-                result.data = parsed
-            else:
-                result.metadata["json_parse_error"] = True
-                result.mark_indeterminate(
-                    "A ação terminou, mas o resultado estruturado não pôde ser validado."
-                )
-        return result
+        return self._apply_json_contract(
+            result,
+            reason=(
+                "A ação terminou, mas o resultado estruturado "
+                "não pôde ser validado."
+            ),
+        )
 
     def execute_psexec(
         self,
