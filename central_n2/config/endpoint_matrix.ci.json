@@ -1,0 +1,25 @@
+{
+  "name": "central-n2-ci-real-windows",
+  "endpoints": [
+    {
+      "alias": "CI-WINDOWS-LOCAL",
+      "target": "localhost",
+      "enabled": true,
+      "expected_state": "READY_LOCAL",
+      "expected_transport": "local",
+      "required_capabilities": [
+        "IsAdmin"
+      ],
+      "roles": [
+        "network"
+      ],
+      "actions": [
+        {
+          "key": "network.flush_dns",
+          "parameters": {},
+          "rollback_after": false
+        }
+      ]
+    }
+  ]
+}
