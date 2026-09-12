@@ -12,6 +12,14 @@ TARGETS = (
 )
 
 
+def _normalized_files(payload: dict) -> dict[str, dict]:
+    files = payload.get("files", {})
+    return {
+        str(path).replace("\\", "/"): data
+        for path, data in files.items()
+    }
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: check_validator_coverage.py <coverage.json>")
@@ -19,7 +27,7 @@ def main() -> int:
 
     report_path = Path(sys.argv[1])
     payload = json.loads(report_path.read_text(encoding="utf-8"))
-    files = payload.get("files", {})
+    files = _normalized_files(payload)
     failures: list[str] = []
 
     for target in TARGETS:
@@ -30,7 +38,10 @@ def main() -> int:
 
         summary = data.get("summary", {})
         percent = float(summary.get("percent_covered", 0.0))
-        print(f"{target}: {percent:.2f}% (mínimo {MINIMUM:.2f}%)")
+        print(
+            f"{target}: {percent:.2f}% "
+            f"(mínimo {MINIMUM:.2f}%)"
+        )
         if percent < MINIMUM:
             failures.append(
                 f"{target}: {percent:.2f}% < {MINIMUM:.2f}%"
