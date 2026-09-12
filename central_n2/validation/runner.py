@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from dataclasses import asdict
@@ -56,9 +57,11 @@ def _redact_target(value: Any, target: str) -> Any:
     if isinstance(value, str):
         if not target:
             return value
-        return value.replace(target, "<TARGET>").replace(
-            target.casefold(),
+        return re.sub(
+            re.escape(target),
             "<TARGET>",
+            value,
+            flags=re.IGNORECASE,
         )
     if isinstance(value, dict):
         return {
