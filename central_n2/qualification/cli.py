@@ -6,6 +6,7 @@ from typing import Any
 from execution.config_validation import validate_execution_configuration
 
 from .matrix import PROFILES
+from .models import CaseStatus
 from .runner import QualificationError, QualificationRunner
 from .runtime import QualificationRuntime
 
@@ -27,6 +28,23 @@ def parse_action_parameters(values: list[str] | None) -> dict[str, dict[str, Any
             )
         parsed.setdefault(action, {})[key] = value
     return parsed
+
+
+def _print_unresolved_cases(report) -> None:
+    unresolved = [
+        case
+        for case in report.cases
+        if case.status in {CaseStatus.FAIL, CaseStatus.UNKNOWN}
+    ]
+    if not unresolved:
+        return
+
+    print("Pendências de homologação:")
+    for case in unresolved:
+        print(
+            f" - {case.status.value:<7} {case.key} | "
+            f"{case.transport or '-'} | {case.message}"
+        )
 
 
 def run_qualification_cli(
@@ -103,6 +121,7 @@ def run_qualification_cli(
             f"PASS={summary['PASS']} FAIL={summary['FAIL']} "
             f"UNKNOWN={summary['UNKNOWN']} SKIP={summary['SKIP']}"
         )
+        _print_unresolved_cases(report)
         print(f"Evidências: {output_dir}")
         if not report.passed:
             failed = True
