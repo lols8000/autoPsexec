@@ -52,6 +52,42 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _redact_target(value: Any, target: str) -> Any:
+    if isinstance(value, str):
+        if not target:
+            return value
+        return value.replace(target, "<TARGET>").replace(
+            target.casefold(),
+            "<TARGET>",
+        )
+    if isinstance(value, dict):
+        return {
+            str(key): _redact_target(item, target)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_target(item, target) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_target(item, target) for item in value)
+    return value
+
+
+def _sanitize_checks(
+    checks: list[ValidationCheck],
+    target: str,
+) -> list[ValidationCheck]:
+    return [
+        ValidationCheck(
+            key=item.key,
+            state=item.state,
+            message=_redact_target(item.message, target),
+            evidence=_redact_target(item.evidence, target),
+            required=item.required,
+        )
+        for item in checks
+    ]
+
+
 def _check_from_result(
     key: str,
     result: CommandResult,
@@ -688,8 +724,8 @@ class EndpointValidationRunner:
             correlation_id=correlation_id,
             started_at=started,
             finished_at=_now(),
-            checks=checks,
-            metadata=metadata,
+            checks=_sanitize_checks(checks, spec.target),
+            metadata=_redact_target(metadata, spec.target),
         )
 
 
