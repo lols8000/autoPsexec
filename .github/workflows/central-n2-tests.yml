@@ -83,7 +83,12 @@ jobs:
           --cov=core --cov=diagnostics --cov=playbooks
           --cov=execution --cov=remediation --cov=reports --cov=storage
           --cov-report=term-missing
+          --cov-report=json:coverage.json
           --cov-fail-under=40
+
+      - name: Enforce validator coverage
+        if: matrix.python-version == '3.12'
+        run: python tests/check_validator_coverage.py coverage.json
 
   build:
     runs-on: windows-latest

@@ -5,6 +5,10 @@ from typing import Any, Callable
 from core.result import CommandResult
 from remediation import ValidationResult, ValidationStatus
 
+ExecutionValidator = Callable[
+    [Any, CommandResult, Any, dict[str, Any]],
+    ValidationResult,
+]
 
 def command_completed(
     before: Any,
@@ -30,17 +34,13 @@ def command_completed(
         after,
     )
 
-
 def field_equals(
     field: str,
     expected: Any,
     *,
     pass_message: str,
     fail_message: str,
-) -> Callable[
-    [Any, CommandResult, Any, dict[str, Any]],
-    ValidationResult,
-]:
+) -> ExecutionValidator:
     def validate(
         before: Any,
         command: CommandResult,
@@ -86,7 +86,6 @@ def field_equals(
 
     return validate
 
-
 def service_running(
     before: Any,
     command: CommandResult,
@@ -114,7 +113,6 @@ def service_running(
             data,
         )
     return command_completed(before, command, after, parameters)
-
 
 def service_stopped(
     before: Any,
@@ -144,14 +142,12 @@ def service_stopped(
         )
     return command_completed(before, command, after, parameters)
 
-
-
 def command_field_true(
     field: str,
     *,
     pass_message: str,
     fail_message: str,
-):
+) -> ExecutionValidator:
     def validate(
         before: Any,
         command: CommandResult,
@@ -191,14 +187,13 @@ def command_field_true(
 
     return validate
 
-
 def after_field_matches_parameter(
     field: str,
     parameter_key: str,
     *,
     pass_message: str,
     fail_message: str,
-):
+) -> ExecutionValidator:
     def validate(
         before: Any,
         command: CommandResult,
@@ -236,8 +231,6 @@ def after_field_matches_parameter(
         )
 
     return validate
-
-
 
 def postcheck_succeeded(
     before: Any,
