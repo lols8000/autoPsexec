@@ -50,7 +50,7 @@ jobs:
           core/connectivity.py core/context.py core/evaluation.py
           core/executor.py core/jobs.py core/logger.py core/result.py
           core/session.py core/transport core/updater.py core/validation.py
-          diagnostics execution playbooks remediation reports storage
+          diagnostics execution playbooks remediation reports storage validation
           integrations/glpi/client.py
           ui/console_base.py ui/console_v5.py ui/tk_app.py
           modules/health.py modules/compliance.py modules/performance.py
@@ -71,6 +71,7 @@ jobs:
           execution/models.py execution/policy.py execution/config_validation.py
           execution/registry.py execution/engine.py
           remediation/engine.py
+          validation/models.py validation/runner.py validation/cli.py
 
       - name: Run tests
         if: matrix.python-version != '3.12'
@@ -81,7 +82,7 @@ jobs:
         run: >-
           python -m pytest -q
           --cov=core --cov=diagnostics --cov=playbooks
-          --cov=execution --cov=remediation --cov=reports --cov=storage
+          --cov=execution --cov=remediation --cov=reports --cov=storage --cov=validation
           --cov-report=term-missing
           --cov-report=json:coverage.json
           --cov-fail-under=40
