@@ -91,6 +91,22 @@ jobs:
         if: matrix.python-version == '3.12'
         run: python tests/check_validator_coverage.py coverage.json
 
+      - name: Field validation smoke - SAFE
+        if: matrix.python-version == '3.12'
+        run: >-
+          python -m validation.cli
+          --matrix config/endpoint_matrix.ci.json
+          --output-dir reports/field-validation-ci-safe
+
+      - name: Field validation smoke - CONTROLLED LOW
+        if: matrix.python-version == '3.12'
+        run: >-
+          python -m validation.cli
+          --matrix config/endpoint_matrix.ci.json
+          --output-dir reports/field-validation-ci-controlled
+          --allow-mutations
+          --acknowledge "VALIDAR ENDPOINTS 5.2"
+
   build:
     runs-on: windows-latest
     needs: test
