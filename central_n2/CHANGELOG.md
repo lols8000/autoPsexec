@@ -61,6 +61,8 @@
 
 ### Qualidade
 
+- adicionada matriz reproduzível de homologação real de endpoints, com modo SAFE, execução controlada, relatórios sanitizados e smoke end-to-end em Windows real no CI;
+
 - testes de policy, preconditions, disconnect/recovery, rollback, busca, allowlists, redaction, SQLite v4 e retry safety;
 - pacote execution incluído em Ruff, mypy e coverage;
 - documentação técnica revisada para 5.2.
