@@ -6,6 +6,7 @@
 - [configuration.md](configuration.md) — configuração efetiva, allowlists e validação no bootstrap.
 - [modules.md](modules.md) — módulos funcionais e catálogos de execução.
 - [operations.md](operations.md) — runbook operacional do suporte N2.
+- [endpoint_validation.md](endpoint_validation.md) — matriz real de homologação, evidências, modo SAFE e ações controladas.
 - [security.md](security.md) — confiança, privilege, retry, rollback e auditoria.
 - [troubleshooting.md](troubleshooting.md) — falhas de transporte, policy e recovery.
 - [development.md](development.md) — como adicionar ações e critérios de DoD.
