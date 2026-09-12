@@ -18,7 +18,7 @@ on:
       - '.github/workflows/release-tag.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: central-n2-tag-promotion
@@ -37,6 +37,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate promotion credential
+        shell: bash
+        env:
+          RELEASE_PROMOTION_TOKEN: ${{ secrets.RELEASE_PROMOTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RELEASE_PROMOTION_TOKEN:-}" ]]; then
+            echo "::error::Secret RELEASE_PROMOTION_TOKEN não configurado."
+            echo "::error::Use uma credencial dedicada com Contents: write e Workflows: write."
+            exit 1
+          fi
 
       - name: Resolve requested tag
         shell: bash
@@ -90,8 +103,12 @@ jobs:
 
       - name: Create annotated tag idempotently
         shell: bash
+        env:
+          RELEASE_PROMOTION_TOKEN: ${{ secrets.RELEASE_PROMOTION_TOKEN }}
         run: |
           set -euo pipefail
+
+          git remote set-url origin             "https://x-access-token:${RELEASE_PROMOTION_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
           remote_ref="$(git ls-remote --tags origin "refs/tags/$TAG_NAME" | awk '{print $1}')"
           if [[ -n "$remote_ref" ]]; then
