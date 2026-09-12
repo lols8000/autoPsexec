@@ -1,0 +1,120 @@
+name: Central N2 Tag Promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag SemVer a criar (ex.: v5.2.1)'
+        required: true
+        type: string
+      target_sha:
+        description: 'Commit SHA já homologado'
+        required: true
+        type: string
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/release-tag.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: central-n2-tag-promotion
+  cancel-in-progress: false
+
+env:
+  BOOTSTRAP_TAG: v5.2.0
+  BOOTSTRAP_SHA: da28161fb826abd418ef8491d45db8d4e15e5282
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve requested tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag='${{ inputs.tag }}'
+            target='${{ inputs.target_sha }}'
+          else
+            tag="$BOOTSTRAP_TAG"
+            target="$BOOTSTRAP_SHA"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag inválida: $tag"
+            exit 1
+          fi
+          if [[ ! "$target" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::SHA inválido: $target"
+            exit 1
+          fi
+
+          echo "TAG_NAME=$tag" >> "$GITHUB_ENV"
+          echo "TARGET_SHA=${target,,}" >> "$GITHUB_ENV"
+
+      - name: Validate release target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "$TARGET_SHA^{commit}"
+          git merge-base --is-ancestor "$TARGET_SHA" origin/master
+
+          expected_version="${TAG_NAME#v}"
+          version="$(git show "$TARGET_SHA:central_n2/VERSION" | tr -d '\r\n')"
+
+          if [[ "$version" != "$expected_version" ]]; then
+            echo "::error::VERSION=$version não corresponde a $TAG_NAME"
+            exit 1
+          fi
+
+          git show "$TARGET_SHA:central_n2/core/version.py" |
+            grep -F "__version__ = \"$expected_version\"" >/dev/null
+          git show "$TARGET_SHA:central_n2/pyproject.toml" |
+            grep -F "version = \"$expected_version\"" >/dev/null
+          git show "$TARGET_SHA:central_n2/installer/CentralN2.iss" |
+            grep -F "#define MyAppVersion \"$expected_version\"" >/dev/null
+          git show "$TARGET_SHA:central_n2/version_info.txt" |
+            grep -F "StringStruct('ProductVersion', '$expected_version')" >/dev/null
+
+          echo "Release target validated: $TAG_NAME -> $TARGET_SHA"
+
+      - name: Create annotated tag idempotently
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if ref_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG_NAME" --jq '.object.sha' 2>/dev/null)"; then
+            ref_type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG_NAME" --jq '.object.type')"
+
+            if [[ "$ref_type" == "tag" ]]; then
+              existing_target="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$ref_sha" --jq '.object.sha')"
+            else
+              existing_target="$ref_sha"
+            fi
+
+            if [[ "${existing_target,,}" == "$TARGET_SHA" ]]; then
+              echo "Tag $TAG_NAME já aponta para $TARGET_SHA; nada a fazer."
+              exit 0
+            fi
+
+            echo "::error::Tag $TAG_NAME já existe em $existing_target"
+            exit 1
+          fi
+
+          tag_object="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" -f tag="$TAG_NAME" -f message="Central N2 Workstation $TAG_NAME" -f object="$TARGET_SHA" -f type="commit" --jq '.sha')"
+
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG_NAME" -f sha="$tag_object" >/dev/null
+
+          echo "Annotated tag created: $TAG_NAME -> $TARGET_SHA"
