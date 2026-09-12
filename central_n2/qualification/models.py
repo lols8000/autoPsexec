@@ -53,9 +53,8 @@ class QualificationReport:
     @property
     def passed(self) -> bool:
         return not any(
-            case.status is CaseStatus.FAIL
+            case.status in {CaseStatus.FAIL, CaseStatus.UNKNOWN}
             for case in self.cases
-            if case.key.startswith("core.") or case.key.startswith("action.")
         )
 
     def summary(self) -> dict[str, int]:
