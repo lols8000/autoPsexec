@@ -136,6 +136,25 @@ pyinstaller CentralN2.spec --clean --noconfirm
 
 O conjunto exato de paths/gates do CI é definido nos workflows versionados.
 
+## Higiene de branches
+
+A branch `master` é a linha única de release. Após merge de PRs do próprio
+repositório, o workflow `.github/workflows/branch-hygiene.yml` remove a branch
+de origem automaticamente.
+
+Na implantação inicial da política, o workflow também executa uma limpeza
+controlada das branches históricas já auditadas. A limpeza nunca inclui
+`master`, não apaga commits do histórico e só atua em refs do mesmo
+repositório.
+
+Critérios usados antes da limpeza inicial:
+
+- branches ancestrais diretas de `master` podem ser removidas;
+- branches de PRs já mergeados podem ser removidas mesmo após squash/merge;
+- branches com PR aberto ou trabalho exclusivo não são removidas sem revisão;
+- implementações abandonadas devem ter o PR fechado com justificativa antes
+  da remoção da ref.
+
 ## Política de release
 
 Não publicar tag se:

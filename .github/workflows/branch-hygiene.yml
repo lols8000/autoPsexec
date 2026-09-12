@@ -1,0 +1,75 @@
+name: Branch Hygiene
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/branch-hygiene.yml'
+      - 'central_n2/docs/release_and_distribution.md'
+  pull_request:
+    types:
+      - closed
+
+permissions:
+  contents: write
+
+jobs:
+  prune:
+    if: >-
+      github.event_name == 'push' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Prune merged branches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          branches=()
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            branches=(
+              "docs/v5-psexec-readable-output"
+              "docs/workstation-v3"
+              "feature/central-n2-v1"
+              "feature/central-n2-v5-complete"
+              "feature/execution-center-v5.2"
+              "fix/readable-psexec-output"
+              "fix/stage3-contract-hardening-v5.2"
+              "fix/windows-output-encoding"
+              "governance/master-protection-v5.2"
+              "hardening/execution-center-v5.2-tests"
+              "hardening/v5-senior-cleanup"
+              "qualification/endpoint-matrix-v5.2"
+              "quality/validator-coverage-v5.2"
+              "validation/endpoint-matrix-v5.2"
+              "workstation-n2-v2"
+              "workstation-n2-v3-responsive"
+              "maintenance/branch-hygiene-v5.2"
+            )
+          else
+            branches=("${{ github.event.pull_request.head.ref }}")
+          fi
+
+          for branch in "${branches[@]}"; do
+            if [[ -z "$branch" || "$branch" == "master" ]]; then
+              continue
+            fi
+
+            ref="heads/$branch"
+
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/$ref" >/dev/null 2>&1; then
+              echo "Deleting merged/stale branch: $branch"
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/$ref"
+            else
+              echo "Branch already absent: $branch"
+            fi
+          done
