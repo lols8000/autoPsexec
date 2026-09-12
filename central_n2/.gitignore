@@ -8,6 +8,7 @@ reports/
 data/*.db
 data/*.db-*
 config/settings.local.json
+config/endpoint_matrix.local.json
 dist/
 build/
 *.spec.local
