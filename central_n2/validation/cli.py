@@ -9,13 +9,10 @@ from core.executor import RemoteExecutor
 from core.logger import AuditLogger
 from execution.config_validation import validate_execution_configuration
 
+from .config import load_campaign
 from .models import CheckState
-from .runner import (
-    EndpointValidationRunner,
-    load_campaign,
-    run_campaign,
-    write_reports,
-)
+from .reporting import write_reports
+from .runner import EndpointValidationRunner, run_campaign
 
 
 ACKNOWLEDGEMENT = "VALIDAR ENDPOINTS 5.2"
