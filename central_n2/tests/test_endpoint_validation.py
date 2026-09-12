@@ -448,3 +448,27 @@ def test_write_reports_are_sanitized(tmp_path: Path):
     )
     assert private_target not in combined
     assert "LAB" in combined
+
+
+
+def test_validate_endpoint_redacts_target_from_errors_and_metadata():
+    private_target = "CORP-HOST-77"
+    runner = EndpointValidationRunner.__new__(
+        EndpointValidationRunner
+    )
+    runner.sessions = SimpleNamespace(
+        open=lambda host, refresh=False: (_ for _ in ()).throw(
+            RuntimeError(f"Connection to {private_target.lower()} failed")
+        )
+    )
+
+    result = runner.validate_endpoint(
+        EndpointSpec("LAB", private_target)
+    )
+
+    encoded = json.dumps(
+        result.public_dict(),
+        ensure_ascii=False,
+    )
+    assert private_target.casefold() not in encoded.casefold()
+    assert "<TARGET>" in encoded
