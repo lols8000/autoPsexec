@@ -10,8 +10,10 @@ O runner de homologação foi desenhado para **não executar mutações por padr
 
 Cada host gera dois artefatos em `reports/qualification`:
 
-- `qualification-HOST-AAAAMMDD-HHMMSS.json` — evidência estruturada completa;
-- `qualification-HOST-AAAAMMDD-HHMMSS.md` — resumo operacional legível.
+- `qualification-HOST-AAAAMMDD-HHMMSS-microssegundos.json` — evidência estruturada completa;
+- `qualification-HOST-AAAAMMDD-HHMMSS-microssegundos.md` — resumo operacional legível.
+
+O sufixo com microssegundos evita colisão entre reexecuções rápidas do mesmo endpoint. Falhas precoces de sessão também geram artefatos; a ausência de transporte não pode apagar a evidência do teste.
 
 Os estados possíveis são:
 
@@ -21,6 +23,8 @@ Os estados possíveis são:
 - `SKIP` — caso não aplicável ao endpoint.
 
 Um endpoint **não é homologado** se houver qualquer `FAIL` ou `UNKNOWN`.
+
+Resultados de APIs estruturadas seguem contrato estrito: se PowerShell/WinRM/PsExec terminar sem JSON válido quando JSON é esperado, o caso é `UNKNOWN`/indeterminado — nunca `PASS` silencioso. Artefatos de homologação passam pelo redactor central antes de serem persistidos.
 
 ## Perfis
 
