@@ -90,31 +90,24 @@ jobs:
 
       - name: Create annotated tag idempotently
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          if ref_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG_NAME" --jq '.object.sha' 2>/dev/null)"; then
-            ref_type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG_NAME" --jq '.object.type')"
-
-            if [[ "$ref_type" == "tag" ]]; then
-              existing_target="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$ref_sha" --jq '.object.sha')"
-            else
-              existing_target="$ref_sha"
-            fi
-
+          remote_ref="$(git ls-remote --tags origin "refs/tags/$TAG_NAME" | awk '{print $1}')"
+          if [[ -n "$remote_ref" ]]; then
+            git fetch --force origin "refs/tags/$TAG_NAME:refs/tags/$TAG_NAME"
+            existing_target="$(git rev-list -n 1 "$TAG_NAME")"
             if [[ "${existing_target,,}" == "$TARGET_SHA" ]]; then
               echo "Tag $TAG_NAME já aponta para $TARGET_SHA; nada a fazer."
               exit 0
             fi
-
             echo "::error::Tag $TAG_NAME já existe em $existing_target"
             exit 1
           fi
 
-          tag_object="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" -f tag="$TAG_NAME" -f message="Central N2 Workstation $TAG_NAME" -f object="$TARGET_SHA" -f type="commit" --jq '.sha')"
-
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG_NAME" -f sha="$tag_object" >/dev/null
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG_NAME" "$TARGET_SHA" -m "Central N2 Workstation $TAG_NAME"
+          git push origin "refs/tags/$TAG_NAME"
 
           echo "Annotated tag created: $TAG_NAME -> $TARGET_SHA"
