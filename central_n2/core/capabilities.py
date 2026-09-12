@@ -88,19 +88,25 @@ try {
             script,
             timeout=90,
         )
-        if not result.success:
+        if not result.success or result.indeterminate:
+            reason = (
+                result.stderr
+                or result.metadata.get("indeterminate_reason")
+                or "Não foi possível confirmar as capabilities do endpoint."
+            )
             return CapabilityReport(
                 host,
                 result.transport,
-                error=result.stderr,
+                error=str(reason),
             )
-        values = (
-            result.data
-            if isinstance(result.data, dict)
-            else {}
-        )
+        if not isinstance(result.data, dict):
+            return CapabilityReport(
+                host,
+                result.transport,
+                error="Payload de capabilities ausente ou inválido.",
+            )
         return CapabilityReport(
             host,
             result.transport,
-            values=values,
+            values=result.data,
         )
