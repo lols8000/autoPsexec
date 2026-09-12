@@ -238,7 +238,12 @@ class ConsoleBase:
 
     @classmethod
     def show_result(cls, result: CommandResult) -> None:
-        status = "✓ SUCESSO" if result.success else "✗ FALHA"
+        if result.indeterminate:
+            status = "⚠ INDETERMINADO"
+        elif result.success:
+            status = "✓ SUCESSO"
+        else:
+            status = "✗ FALHA"
         print(
             f"\n{status} [{result.transport}] — "
             f"{result.duration_ms} ms"
